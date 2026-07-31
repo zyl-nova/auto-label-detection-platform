@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: UserServer
+  cloud:
+    nacos:
+      discovery:
+        enabled: false
+        server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    locale: zh_CN
+    time-zone: GMT+8
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/postgres}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+  redis:
+    database: 0
+    port: 6379
+    host: localhost
+server:
+  port: 82
+
+mybatis:
+  mapper-locations: classpath:mapper/*.xml

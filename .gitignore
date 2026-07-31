@@ -1,0 +1,32 @@
+# IDE and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Frontend dependencies and build output
+junrui/dltools/node_modules/
+junrui/dltools/dist/
+junrui/dltools/.vite/
+junrui/dltools/node_modules/.tmp/
+
+# Maven / Java build output
+Java_proj/idtserver/mrserver/**/target/
+
+# Local runtime uploads and generated model files
+Java_proj/idtserver/mrserver/static/
+Java_proj/idtserver/static/
+Java_proj/idtserver/mrserver/**/static/
+
+# Local environment files
+.env
+.env.*
+*.local
+
+# Temporary files
+*.tmp
+*.temp

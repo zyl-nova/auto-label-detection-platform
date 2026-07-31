@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.idtserver.mrserver.mapper.ImageLabelMapper">
+    <resultMap id="FileManager" type="com.idtserver.mrserver.dto.FileManager">
+        <id column="id" jdbcType="BIGINT" property="id"
+            javaType="java.lang.String" />
+        <result column="code" jdbcType="VARCHAR" property="code" />
+        <result column="e_name" jdbcType="VARCHAR" property="eName" />
+        <result column="c_name" jdbcType="VARCHAR" property="cName" />
+        <result column="proj_id" jdbcType="BIGINT" property="projId"
+                javaType="java.lang.String" />
+        <result column="sort" jdbcType="INTEGER" property="sort" />
+        <result column="original_file_type" jdbcType="VARCHAR" property="originalFileType" />
+        <result column="create_time" jdbcType="TIMESTAMP" property="createTime" />
+        <result column="update_time" jdbcType="TIMESTAMP" property="updateTime" />
+        <result column="logical_delete" jdbcType="INTEGER" property="logicalDelete" />
+        <result column="des" jdbcType="VARCHAR" property="des" />
+        <result column="status" jdbcType="INTEGER" property="status" />
+        <result column="original_file_store_url" jdbcType="VARCHAR" property="originalFileStoreUrl" />
+        <result column="disposed_file_store_url" jdbcType="VARCHAR" property="disposedFileStoreUrl" />
+        <result column="proj_name" jdbcType="VARCHAR" property="projName" />
+        <result column="create_user_name" jdbcType="VARCHAR" property="createUserName" />
+
+    </resultMap>
+
+    <resultMap id="LabelTask" type="com.idtserver.mrserver.dto.LabelTask">
+        <id column="id" jdbcType="BIGINT" property="id"
+            javaType="java.lang.String" />
+        <result column="proj_id" jdbcType="BIGINT" property="projId"
+                javaType="java.lang.String" />
+        <result column="e_name" jdbcType="VARCHAR" property="eName" />
+        <result column="c_name" jdbcType="VARCHAR" property="cName" />
+        <result column="dead_line" jdbcType="TIMESTAMP" property="deadLine" />
+        <result column="sort" jdbcType="INTEGER" property="sort" />
+        <result column="status" jdbcType="INTEGER" property="status" />
+        <result column="create_time" jdbcType="TIMESTAMP" property="createTime" />
+        <result column="update_time" jdbcType="TIMESTAMP" property="updateTime" />
+        <result column="logical_delete" jdbcType="INTEGER" property="logicalDelete" />
+        <result column="desc" jdbcType="VARCHAR" property="desc" />
+        <result column="status" jdbcType="INTEGER" property="status" />
+        <result column="info_files_manager_info_id" jdbcType="BIGINT" property="infoFilesManagerInfoId"
+                javaType="java.lang.String" />
+    </resultMap>
+
+    <resultMap id="MapLabelTaskPicsToUser" type="com.idtserver.mrserver.dto.MapLabelTaskPicsToUser">
+        <id column="id" jdbcType="BIGINT" property="id"
+            javaType="java.lang.String" />
+        <result column="info_files_manager_info_id" jdbcType="BIGINT" property="infoFilesManagerInfoId"
+                javaType="java.lang.String" />
+        <result column="info_label_task_id" jdbcType="BIGINT" property="infoLabelTaskId"
+                javaType="java.lang.String" />
+        <result column="label_data" jdbcType="VARCHAR" property="labelData" />
+        <result column="label_list" jdbcType="VARCHAR" property="labelList" />
+        <result column="user_id" jdbcType="INTEGER" property="userId"
+                javaType="java.lang.String" />
+        <result column="review_status" jdbcType="INTEGER" property="reviewStatus" />
+        <result column="create_time" jdbcType="TIMESTAMP" property="createTime" />
+        <result column="update_time" jdbcType="TIMESTAMP" property="updateTime" />
+        <result column="logical_delete" jdbcType="INTEGER" property="logicalDelete" />
+        <result column="pic_store_url" jdbcType="VARCHAR" property="picStoreUrl" />
+    </resultMap>
+
+
+    <select id="getAllFileManagerList" resultMap="FileManager">
+        select
+            tab.id,
+            tab.code,
+            tab.e_name,
+            tab.c_name,
+            tab.proj_id,
+            tab.sort,
+            tab.original_file_type,
+            tab.create_time,
+            tab.update_time,
+            tab.logical_delete,
+            tab.des,
+            tab.status,
+            tab.original_file_store_url,
+            tab.disposed_file_store_url,
+            cptl.name as proj_name,
+        from info_files_manager_info tab
+        left join conf_proj_tree_list cptl on cptl.id = tab.proj_id
+        where tab.logical_delete = 0
+        and cptl.logical_delete = 0
+        <if test="projId != null">
+            and tab.proj_id = #{projId}
+        </if>
+    </select>
+
+    <select id="getLabelTasks" resultMap="LabelTask">
+        select
+            tab.id,
+            tab.proj_id,
+            tab.e_name,
+            tab.c_name,
+            tab.dead_line,
+            tab.status,
+            tab.sort,
+            tab.create_time,
+            tab.update_time,
+            tab.desc
+        from info_label_task tab
+        left join info_files_manager_info ifmi on ifmi.id = tab.info_files_manager_info_id
+        left join conf_proj_tree_list cptl on cptl.id = tab.proj_id
+        where tab.logical_delete = 0
+        and cptl.logical_delete = 0
+        <if test="projId != null">
+            and tab.proj_id = #{projId}
+        </if>
+    </select>
+
+    <select id="getLabelTasksPics" resultMap="MapLabelTaskPicsToUser">
+        select
+            tab.id,
+            tab.info_files_manager_info_id,
+            tab.info_label_task_id,
+            tab.label_data,
+            tab.label_list,
+            tab.user_id,
+            tab.review_status,
+            tab.create_time,
+            tab.update_time,
+            tab.logical_delete,
+            tab.pic_store_url
+        from map_label_task_pics_to_user tab
+        left join info_files_manager_info ifmi on ifmi.id = tab.info_files_manager_info_id
+        left join sys_user su on  su.id = tab.user_id
+        where tab.logical_delete = 0
+        <if test="infoFilesManagerInfoId != null">
+            and tab.info_files_manager_info_id = #{infoFilesManagerInfoId}
+        </if>
+    </select>
+
+    <insert id="createLabelTask" parameterType="com.idtserver.mrserver.dto.LabelTask">
+        insert into info_label_task
+        (
+            id,
+            proj_id,
+            e_name,
+            c_name,
+            dead_line,
+            status,
+            sort,
+            create_time,
+            update_time,
+            logical_delete,
+            desc,
+            info_files_manager_info_id
+        )
+        values
+        (
+            CAST(#{id} AS int8),
+            CAST(#{proj_id} AS int8),
+            #{e_name},
+            #{c_name},
+            #{dead_line},
+            #{status},
+            #{create_time},
+            #{update_time},
+            #{logical_delete},
+            #{desc},
+            CAST(#{info_files_manager_info_id} AS int8)
+        )
+    </insert>
+
+    
+
+
+    <update id="updateLabelTask">
+        update info_label_task
+        <set>
+            proj_id = CAST(#{projId} AS int8),
+            e_name = #{eName},
+            c_name = #{cName},
+            dead_line = #{deadLine},
+            status = #{status},
+            sort = #{sort}
+            update_time = #{updateTime},
+            logical_delete = #{logicalDelete},
+            logical_delete = #{logicalDelete},
+            des = #{des}
+
+        </set>
+        where id = CAST(#{id} AS int8)
+
+    </update>
+
+    <update id="deleteLabelTask">
+        update info_label_task
+        <set>
+            logical_delete = 1
+        </set>
+        where id = CAST(#{id} AS int8)
+    </update>
+    
+    
+
+</mapper>

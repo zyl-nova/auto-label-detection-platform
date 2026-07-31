@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.idtserver.mrserver.mapper.ModelCenterMapper">
+
+
+
+    <resultMap id="ConfModelCenterTreeList" type="com.idtserver.mrserver.dto.ConfProjTreeList">
+    <id column="id" jdbcType="BIGINT" property="id"
+        javaType="java.lang.String" />
+    <result column="code" jdbcType="VARCHAR" property="code" />
+    <result column="p_code" jdbcType="VARCHAR" property="pCode" />
+    <result column="p_id" jdbcType="BIGINT" property="pId"
+            javaType="java.lang.String" />
+    <result column="name" jdbcType="VARCHAR" property="name" />
+    <result column="sort" jdbcType="INTEGER" property="sort" />
+    <result column="create_time" jdbcType="TIMESTAMP" property="createTime" />
+    <result column="update_time" jdbcType="TIMESTAMP" property="updateTime" />
+    <result column="logical_delete" jdbcType="INTEGER" property="logicalDelete" />
+    </resultMap>
+
+    <resultMap id="ModelInfo" type="com.idtserver.mrserver.dto.InfoModelCenterModelBaseInfo">
+        <id column="id" jdbcType="BIGINT" property="id"
+            javaType="java.lang.String" />
+        <result column="code" jdbcType="VARCHAR" property="code" />
+        <result column="e_name" jdbcType="VARCHAR" property="eName" />
+        <result column="c_name" jdbcType="VARCHAR" property="cName" />
+        <result column="proj_id" jdbcType="BIGINT" property="projId"
+                javaType="java.lang.String" />
+        <result column="proj_name" jdbcType="VARCHAR" property="projName"/>
+        <result column="sort" jdbcType="INTEGER" property="sort" />
+        <result column="model_dir_url" jdbcType="VARCHAR" property="modelDirUrl" />
+        <result column="create_time" jdbcType="TIMESTAMP" property="createTime" />
+        <result column="update_time" jdbcType="TIMESTAMP" property="updateTime" />
+        <result column="logical_delete" jdbcType="INTEGER" property="logicalDelete" />
+        <result column="status" jdbcType="INTEGER" property="status" />
+        <result column="des" jdbcType="VARCHAR" property="des" />
+    </resultMap>
+
+    <select id="getConfModelCenterTreeList" resultMap="ConfModelCenterTreeList">
+        select
+            tab.id,
+            tab.code,
+            tab.p_code,
+            tab.p_id,
+            tab.name,
+            tab.sort,
+            tab.create_time,
+            tab.update_time
+        from conf_proj_tree_list tab
+        where tab.logical_delete = 0
+    </select>
+
+
+    <insert id="createConfModelCenterModelBaseInfo" parameterType="com.idtserver.mrserver.dto.InfoModelCenterModelBaseInfo">
+        <selectKey keyProperty="id" resultType="java.lang.String" order="BEFORE">
+            select snow_next_id() as id
+        </selectKey>
+        insert into info_model_center_model_base_info
+        (
+        id,
+         code,
+        e_name,
+        c_name,
+        proj_id,
+        model_dir_url,
+        create_time,
+        update_time,
+        logical_delete,
+        status,
+        des)
+        values
+        (
+        CAST(#{id} AS int8),
+        #{code},
+        #{eName},
+        #{cName},
+        CAST(#{projId} AS int8),
+        #{modelDirUrl},
+        #{createTime},
+        #{updateTime},
+        #{logicalDelete},
+        #{status},
+        #{des}
+        )
+    </insert>
+
+    <select id="getInfoModelCenterModelBaseInfo" resultMap="ModelInfo">
+        select
+            tab.id,
+            tab.code,
+            tab.e_name,
+            tab.c_name,
+            tab.proj_id,
+            cptl.name as proj_name,
+            tab.sort,
+            tab.model_dir_url,
+            tab.create_time,
+            tab.update_time,
+            tab.logical_delete,
+            tab.status,
+            tab.des
+        from info_model_center_model_base_info tab
+        left join conf_proj_tree_list cptl on cptl.id = tab.proj_id
+        where tab.logical_delete = 0
+          and cptl.logical_delete = 0
+        <if test="projId != null">
+           and tab.proj_id = CAST(#{projId} AS int8)
+        </if>
+        <if test="mainInfo != null and mainInfo != ''">
+            AND
+            (
+                CAST(tab.ID AS TEXT) LIKE CONCAT('%', #{mainInfo}, '%')
+                OR
+                CAST(tab.proj_id AS TEXT) LIKE CONCAT('%', #{mainInfo}, '%')
+                OR
+                cmctl.code LIKE CONCAT('%', #{mainInfo}, '%')
+                OR
+                cmctl.name LIKE CONCAT('%', #{mainInfo}, '%')
+                OR
+                tab.e_name LIKE CONCAT('%', #{mainInfo}, '%')
+                OR
+                tab.c_name LIKE CONCAT('%', #{mainInfo}, '%')
+            )
+        </if>
+        <if test="modelStatus != null and modelStatus != '' ">
+            AND tab.status = #{modelStatus}
+        </if>
+        <choose>
+            <when test="isDesc == true">
+                ORDER BY tab.sort desc
+            </when>
+            <otherwise>
+                ORDER BY tab.sort asc
+            </otherwise>
+        </choose>
+
+    </select>
+    
+    <update id="updateConfModelCenterModelBaseInfo">
+        update info_model_center_model_base_info
+        <set>
+            code = #{code},
+            e_name = #{eName},
+            c_name = #{cName},
+            proj_id = #{projId},
+            sort = #{sort},
+            model_dir_url = #{modelDirUrl},
+            create_time = #{createTime},
+            update_time = #{updateTime},
+            status = #{status},
+            des = #{des}
+        </set>
+        where id = CAST(#{id} AS int8)
+    </update>
+
+    <update id="deleteConfModelCenterModelBaseInfo">
+        update info_model_center_model_base_info
+        <set>
+            logical_delete = 1
+        </set>
+        where id = CAST(#{id} AS int8)
+    </update>
+
+</mapper>

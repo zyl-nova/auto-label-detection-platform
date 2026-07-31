@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.idtserver.mrserver.mapper.FileManagerMapper">
+    <resultMap id="FileManager" type="com.idtserver.mrserver.dto.FileManager">
+        <id column="id" jdbcType="BIGINT" property="id"
+            javaType="java.lang.String" />
+        <result column="code" jdbcType="VARCHAR" property="code" />
+        <result column="e_name" jdbcType="VARCHAR" property="eName" />
+        <result column="c_name" jdbcType="VARCHAR" property="cName" />
+        <result column="proj_id" jdbcType="BIGINT" property="projId"
+                javaType="java.lang.String" />
+        <result column="sort" jdbcType="INTEGER" property="sort" />
+        <result column="original_file_type" jdbcType="VARCHAR" property="originalFileType" />
+        <result column="create_time" jdbcType="TIMESTAMP" property="createTime" />
+        <result column="update_time" jdbcType="TIMESTAMP" property="updateTime" />
+        <result column="logical_delete" jdbcType="INTEGER" property="logicalDelete" />
+        <result column="des" jdbcType="VARCHAR" property="des" />
+        <result column="status" jdbcType="INTEGER" property="status" />
+        <result column="original_file_store_url" jdbcType="VARCHAR" property="originalFileStoreUrl" />
+        <result column="disposed_file_store_url" jdbcType="VARCHAR" property="disposedFileStoreUrl" />
+        <result column="proj_name" jdbcType="VARCHAR" property="projName" />
+        <result column="create_user_name" jdbcType="VARCHAR" property="createUserName" />
+
+    </resultMap>
+
+
+    <select id="getFileManagerRecordList" resultMap="FileManager">
+        select
+        tab.id,
+            tab.code,
+            tab.e_name,
+            tab.c_name,
+            tab.proj_id,
+            tab.sort,
+            tab.original_file_type,
+            tab.create_time,
+            tab.update_time,
+            tab.logical_delete,
+            tab.des,
+            tab.status,
+            tab.original_file_store_url,
+            tab.disposed_file_store_url,
+            cptl.name as proj_name,
+            su.username as create_user_name
+        from info_files_manager_info tab
+        left join conf_proj_tree_list cptl on cptl.id = tab.proj_id
+        left join  sys_user su on su.id = tab.create_user_id
+        where tab.logical_delete = 0
+        and cptl.logical_delete = 0
+        <if test="fileType != null and fileType >= 0">
+            and tab.original_file_type = #{fileType}
+        </if>
+        <if test="projId != null and projId != ''">
+            and tab.proj_id = CAST(#{projId} AS int8)
+        </if>
+        <if test="mainInfo != null and mainInfo != ''">
+            AND
+            (
+                CAST(tab.ID AS TEXT) LIKE CONCAT('%', #{mainInfo}, '%')
+                OR
+                CAST(tab.proj_id AS TEXT) LIKE CONCAT('%', #{mainInfo}, '%')
+                OR
+                tab.e_name LIKE CONCAT('%', #{mainInfo}, '%')
+                OR
+                tab.c_name LIKE CONCAT('%', #{mainInfo}, '%')
+            )
+        </if>
+        <choose>
+            <when test="isDesc == true">
+                ORDER BY tab.sort desc
+            </when>
+            <otherwise>
+                ORDER BY tab.sort asc
+            </otherwise>
+        </choose>
+
+    </select>
+
+    <select id="getFileManagerRecordById" resultMap="FileManager">
+        select
+            tab.id,
+            tab.code,
+            tab.e_name,
+            tab.c_name,
+            tab.proj_id,
+            tab.sort,
+            tab.original_file_type,
+            tab.create_time,
+            tab.update_time,
+            tab.logical_delete,
+            tab.des,
+            tab.status,
+            tab.original_file_store_url,
+            tab.disposed_file_store_url,
+            cptl.name as proj_name,
+            su.username as create_user_name
+        from info_files_manager_info tab
+        left join conf_proj_tree_list cptl on cptl.id = tab.proj_id
+        left join sys_user su on su.id = tab.create_user_id
+        where tab.logical_delete = 0
+        and tab.id = CAST(#{id} AS int8)
+    </select>
+
+    <insert id="createFileManagerRecord" parameterType="com.idtserver.mrserver.dto.FileManager">
+        insert into info_files_manager_info
+        (
+            id,
+            code,
+            e_name,
+            c_name,
+            proj_id,
+            original_file_type,
+            create_time,
+            update_time,
+            logical_delete,
+            des,
+            status,
+            original_file_store_url,
+            disposed_file_store_url,
+            create_user_id
+        )
+        values
+        (
+            CAST(#{id} AS int8),
+            #{code},
+            #{eName},
+            #{cName},
+            CAST(#{projId} AS int8),
+            #{originalFileType},
+            #{createTime},
+            #{updateTime},
+            #{logicalDelete},
+            #{des},
+            #{status},
+            #{originalFileStoreUrl},
+            #{disposedFileStoreUrl},
+            CAST(#{createUserId} AS int8)
+        )
+    </insert>
+
+
+    <update id="updateFileManagerRecord">
+        update info_files_manager_info
+        <set>
+            <if test="code != null">code = #{code},</if>
+            <if test="eName != null">e_name = #{eName},</if>
+            <if test="cName != null">c_name = #{cName},</if>
+            <if test="projId != null">proj_id = CAST(#{projId} AS int8),</if>
+            <if test="originalFileType != null">original_file_type = #{originalFileType},</if>
+            update_time = #{updateTime},
+            <if test="logicalDelete != null">logical_delete = #{logicalDelete},</if>
+            <if test="des != null">des = #{des},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="originalFileStoreUrl != null">original_file_store_url = #{originalFileStoreUrl},</if>
+            <if test="disposedFileStoreUrl != null">disposed_file_store_url = #{disposedFileStoreUrl},</if>
+        </set>
+        where id = CAST(#{id} AS int8)
+
+    </update>
+
+    <update id="deleteFileManagerRecord">
+        update info_files_manager_info
+        <set>
+            logical_delete = 1
+        </set>
+        where id = CAST(#{id} AS int8)
+    </update>
+    
+    
+    <insert id="createPicsForLabeling" parameterType="java.util.List">
+        insert into map_label_task_pics_to_user
+        (
+            info_files_manager_info_id,
+            info_label_task_id,
+            label_data,
+            label_list,
+            map_label_task_user_tab_id,
+            review_status,
+            create_time,
+            update_time,
+            logical_delete,
+            pic_store_url
+        )values
+        <foreach collection="list" item="item" separator=",">
+            (
+                CAST(#{item.infoFilesManagerInfoId} AS int8),
+                CAST(#{item.infoLabelTaskId} AS int8),
+                #{item.labelData},
+                #{item.labelList},
+                CAST(#{item.mapLabelTaskUserTabId} AS int8),
+                #{item.reviewStatus},
+                #{item.createTime},
+                #{item.updateTime},
+                #{item.logicalDelete},
+                #{item.picStoreUrl}
+            )
+        </foreach>
+
+    </insert>
+</mapper>

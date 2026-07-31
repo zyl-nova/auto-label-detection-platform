@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.idtserver.mrserver.mapper.TaskCenterMapper">
+  <resultMap id="InfoTaskCenterTrainInfo" type="com.idtserver.mrserver.dto.InfoTaskCenterTrainInfo">
+    <id column="id" jdbcType="BIGINT" property="id" javaType="java.lang.String"/>
+    <result column="task_name" jdbcType="VARCHAR" property="taskName" />
+    <result column="proj_id" jdbcType="BIGINT" property="projId" javaType="java.lang.String"/>
+    <result column="des" jdbcType="VARCHAR" property="des" />
+    <result column="pre_train_model_id" jdbcType="BIGINT" property="preTrainModelId" javaType="java.lang.String"/>
+    <result column="sample_url" jdbcType="VARCHAR" property="sampleUrl" />
+    <result column="model_output_url" jdbcType="VARCHAR" property="modelOutputUrl" />
+    <result column="learning_rate"  property="learningRate" />
+    <result column="epoch" jdbcType="BIGINT" property="epoch" javaType="java.lang.String"/>
+    <result column="batch_size" jdbcType="INTEGER" property="batchSize" />
+    <result column="test_files_url" jdbcType="VARCHAR" property="testFilesUrl" />
+    <result column="sort" jdbcType="INTEGER" property="sort" />
+    <result column="create_time" jdbcType="TIMESTAMP" property="createTime" />
+    <result column="update_time" jdbcType="TIMESTAMP" property="updateTime" />
+    <result column="logical_delete" jdbcType="INTEGER" property="logicalDelete" />
+    <result column="model_id" jdbcType="BIGINT" property="modelId" javaType="java.lang.String"/>
+    <result column="status" jdbcType="INTEGER" property="status" />
+  </resultMap>
+  
+  <insert id="createTask" parameterType="com.idtserver.mrserver.dto.InfoTaskCenterTrainInfo">
+    <selectKey keyProperty="id" resultType="java.lang.String" order="BEFORE">
+      select snow_next_id() as id
+    </selectKey>
+
+      insert into info_task_center_train_info
+      (
+       id,
+        task_name,
+        proj_id,
+        des,
+        pre_train_model_id,
+        sample_url,
+        model_output_url,
+        learning_rate,
+        epoch,
+        batch_size,
+        test_files_url,
+        create_time,
+        update_time,
+        logical_delete,
+       model_id
+    )
+      values
+        (
+            CAST(#{id} AS int8),
+          #{taskName},
+          CAST(#{projId} AS int8),
+          #{des},
+          CAST(#{preTrainModelId} AS int8),
+          #{sampleUrl},
+          #{modelOutputUrl},
+      CAST(#{learningRate} AS DECIMAL(10,5)) ,
+          CAST(#{epoch} AS int8),
+          #{batchSize},
+          #{testFilesUrl},
+          #{createTime},
+          #{updateTime},
+          #{logicalDelete},
+            CAST(#{modelId} AS int8)
+        )
+
+  </insert>
+
+
+  <select id="getTasks" resultMap="InfoTaskCenterTrainInfo">
+    select
+        tab.id,
+        tab.task_name,
+        tab.proj_id,
+        tab.des,
+        tab.pre_train_model_id,
+        tab.sample_url,
+        tab.model_output_url,
+        tab.learning_rate,
+        tab.epoch,
+        tab.batch_size,
+        tab.test_files_url,
+        tab.sort,
+        tab.create_time,
+        tab.update_time,
+        tab.logical_delete,
+        tab.model_id,
+        imcmbi.status
+
+    from info_task_center_train_info tab
+    left join conf_model_center_tree_list cmctl on cmctl.id = tab.proj_id
+    left join info_model_center_model_base_info imcmbi on imcmbi.id = tab.model_id
+    where
+        imcmbi.logical_delete = 0
+    and
+        tab.logical_delete = 0
+    <if test="mainInfo != null and mainInfo != ''">
+      AND
+      (
+        CAST(tab.id AS TEXT) LIKE CONCAT('%', #{mainInfo} , '%')
+      OR
+        CAST(tab.proj_id AS TEXT) LIKE CONCAT('%',  #{mainInfo}, '%')
+      OR
+      cmctl.code LIKE CONCAT('%', #{mainInfo}, '%')
+      OR
+      cmctl.name LIKE CONCAT('%', #{mainInfo}, '%')
+      OR
+      tab.task_name LIKE CONCAT('%', #{mainInfo}, '%')
+
+      )
+    </if>
+    <if test="modelStatus != null and modelStatus != '' ">
+      AND imcmbi.status = #{modelStatus}
+    </if>
+    <choose>
+      <when test="isDesc == true">
+        ORDER BY tab.sort desc
+      </when>
+      <otherwise>
+        ORDER BY tab.sort asc
+      </otherwise>
+    </choose>
+  </select>
+
+  <update id="updateTask">
+    update info_task_center_train_info
+    <set>
+       taskName = #{taskName},
+       projId = CAST(#{projId} AS int8),
+       des = #{des},
+       preTrainModelId = CAST(#{preTrainModelId} AS int8),
+       sampleUrl = #{sampleUrl},
+       modelOutputUrl = #{modelOutputUrl},
+       learningRate = CAST(#{learningRate} AS int8),
+       epoch = CAST(#{epoch} AS int8),
+       batchSize = #{batchSize},
+       testFilesUrl = #{testFilesUrl},
+       sort = #{sort},
+       createTime = #{createTime},
+       updateTime = #{updateTime},
+       logicalDelete = #{logicalDelete}
+    </set>
+  </update>
+
+  <update id="deleteTask">
+    update info_task_center_train_info
+    <set>
+      logical_delete = 1
+    </set>
+    where id = #{id}
+  </update>
+</mapper>

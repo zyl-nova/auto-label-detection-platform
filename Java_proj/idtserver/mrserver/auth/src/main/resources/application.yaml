@@ -1,0 +1,54 @@
+spring:
+  application:
+    name: AuthServer
+  cloud:
+    nacos:
+      discovery:
+        enabled: false
+        server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/postgres}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+  redis:
+    database: 0
+    port: 6379
+    host: localhost
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    locale: zh_CN
+    time-zone: GMT+8
+
+server:
+  port: 81
+
+feign:
+  hystrix:
+    enabled: true
+hystrix:
+  command:
+    default:
+      execution:
+        isolation:
+          thread:
+            timeoutInMilliseconds: 60000
+ribbon:
+  ReadTimeout: 30000
+  ConnectTimeout: 60000
+  MaxAutoRetries: 0
+  MaxAutoRetriesNextServer: 1
+
+mybatis:
+  mapper-locations: classpath:mapper/**/*Mapper.xml
+#  global-config:
+#    db-config:
+      #主键类型  0:"数据库ID自增",1:"该类型为未设置主键类型", 2:"用户输入ID",3:"全局唯一ID (数字类型唯一ID)", 4:"全局唯一ID UUID";
+#      id-type: assign_id
+#      # 默认数据库表下划线命名
+#      table-underline: true
+  configuration:
+    # 返回类型为Map,显示null对应的字段
+    call-setters-on-nulls: true
+    # 这个配置会将执行的sql打印出来，在开发或测试的时候可以用
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
