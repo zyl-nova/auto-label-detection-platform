@@ -51,7 +51,7 @@
                 javaType="java.lang.String" />
         <result column="label_data" jdbcType="VARCHAR" property="labelData" />
         <result column="label_list" jdbcType="VARCHAR" property="labelList" />
-        <result column="user_id" jdbcType="INTEGER" property="userId"
+        <result column="user_id" jdbcType="INTEGER" property="mapLabelTaskUserTabId"
                 javaType="java.lang.String" />
         <result column="review_status" jdbcType="INTEGER" property="reviewStatus" />
         <result column="create_time" jdbcType="TIMESTAMP" property="createTime" />
@@ -130,6 +130,68 @@
             and tab.info_files_manager_info_id = #{infoFilesManagerInfoId}
         </if>
     </select>
+
+    <select id="getSavedAnnotation" resultMap="MapLabelTaskPicsToUser">
+        select
+            tab.id,
+            tab.info_files_manager_info_id,
+            tab.info_label_task_id,
+            tab.label_data,
+            tab.label_list,
+            tab.user_id,
+            tab.review_status,
+            tab.create_time,
+            tab.update_time,
+            tab.logical_delete,
+            tab.pic_store_url
+        from map_label_task_pics_to_user tab
+        where tab.logical_delete = 0
+        and tab.info_files_manager_info_id = #{fileId}
+        and tab.info_label_task_id = #{taskId}
+        limit 1
+    </select>
+
+    <insert id="createAnnotation" parameterType="com.idtserver.mrserver.dto.MapLabelTaskPicsToUser">
+        insert into map_label_task_pics_to_user
+        (
+            info_files_manager_info_id,
+            info_label_task_id,
+            label_data,
+            label_list,
+            user_id,
+            review_status,
+            create_time,
+            update_time,
+            logical_delete,
+            pic_store_url
+        )
+        values
+        (
+            CAST(#{infoFilesManagerInfoId} AS int8),
+            CAST(#{infoLabelTaskId} AS int8),
+            CAST(#{labelData} AS jsonb),
+            CAST(#{labelList} AS jsonb),
+            CAST(#{mapLabelTaskUserTabId} AS int4),
+            #{reviewStatus},
+            #{createTime},
+            #{updateTime},
+            #{logicalDelete},
+            #{picStoreUrl}
+        )
+    </insert>
+
+    <update id="updateAnnotation" parameterType="com.idtserver.mrserver.dto.MapLabelTaskPicsToUser">
+        update map_label_task_pics_to_user
+        <set>
+            label_data = CAST(#{labelData} AS jsonb),
+            label_list = CAST(#{labelList} AS jsonb),
+            review_status = #{reviewStatus},
+            update_time = #{updateTime},
+            logical_delete = #{logicalDelete},
+            pic_store_url = #{picStoreUrl}
+        </set>
+        where id = CAST(#{id} AS int8)
+    </update>
 
     <insert id="createLabelTask" parameterType="com.idtserver.mrserver.dto.LabelTask">
         insert into info_label_task

@@ -9,10 +9,14 @@ import App from './App.vue'
 import router from './router'
 import SvgIcon from './components/svgIcon/SvgIcon.vue'
 import './assets/iconfont/iconfont.js'
+import { persistBusinessStore } from './stores/persistBusinessStore'
 
 const app = createApp(App)
+const pinia = createPinia()
 
-app.use(createPinia())
+pinia.use(persistBusinessStore)
+
+app.use(pinia)
 app.use(router)
 app.component('SvgIcon',SvgIcon)
 

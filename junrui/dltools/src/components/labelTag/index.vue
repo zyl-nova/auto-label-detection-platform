@@ -174,7 +174,7 @@ const saveTask = () => {
 
 const startLabel = (id: number) => {
   business.updateLabelTaskStatus(id, '标注中')
-  router.push('/label/labeling')
+  router.push({ path: '/label/labeling', query: { taskId: String(id) } })
 }
 
 const completeTask = (id: number) => {

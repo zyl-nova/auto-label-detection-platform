@@ -5,6 +5,7 @@ import com.alibaba.fastjson.JSON;
 import com.github.pagehelper.PageInfo;
 import com.idtserver.mrserver.dto.FileManager;
 import com.idtserver.mrserver.mapper.FileManagerMapper;
+import com.idtserver.mrserver.result.NotResultWrap;
 import com.idtserver.mrserver.result.Result;
 import com.idtserver.mrserver.service.FileManagerService;
 import org.springframework.core.io.FileSystemResource;
@@ -56,7 +57,7 @@ public class FileManagerController {
 
     // 用于处理每个分片的上传
     @PostMapping("addFile")
-    public String uploadChunk(@RequestParam("file") MultipartFile file,
+    public Result<String> uploadChunk(@RequestParam("file") MultipartFile file,
                               @RequestParam("fileManager") String fileManagerJson,
                               @RequestParam("chunkNumber") String chunkNumberStr,
                               @RequestParam("totalChunks") String totalChunksStr,
@@ -77,7 +78,8 @@ public class FileManagerController {
             String originalFIlesStorePath = prefix + "/" + orginalFilePath;
 
             Path path = Paths.get(originalFIlesStorePath);
-            File dir = new File(path.toAbsolutePath().toString() + '/' + newFileName);
+            Files.createDirectories(path);
+            File dir = new File(path.toAbsolutePath().toString() + '/' + UUIDFileName);
             if (!dir.exists()) {
                 dir.mkdirs();
             }
@@ -88,24 +90,24 @@ public class FileManagerController {
 
             // 检查是否是最后一个分片，如果是，则合并文件
             if (chunkNumber == totalChunks - 1) {
-                String storePath = mergeChunks(path.toAbsolutePath().toString(), newFileName, totalChunks);
+                String storePath = mergeChunks(path.toAbsolutePath().toString(), UUIDFileName, newFileName, totalChunks);
                 fileManager.setOriginalFileStoreUrl(storePath);
                 fileManager.setCreateUserId(addFileUserId);
                 fileManagerService.addNewFileManagerRecord(fileManager, storePath);
 
-                return "File uploaded and merged successfully.";
+                return Result.success("File uploaded and merged successfully.");
             }
 
-            return "Chunk " + (chunkNumber + 1) + " uploaded successfully.";
+            return Result.success("Chunk " + (chunkNumber + 1) + " uploaded successfully.");
         } catch (IOException e) {
             e.printStackTrace();
-            return "Error uploading chunk: " + e.getMessage();
+            return Result.failure("Error uploading chunk: " + e.getMessage());
         }
     }
 
     // 合并分片文件
-    private String mergeChunks(String storePath, String fileName, int totalChunks) throws IOException {
-        File dir = new File(storePath + '/' + fileName );
+    private String mergeChunks(String storePath, String chunkDirName, String fileName, int totalChunks) throws IOException {
+        File dir = new File(storePath + '/' + chunkDirName);
         File mergedFile = new File(storePath + '/' + fileName);
 
         try (FileOutputStream fos = new FileOutputStream(mergedFile)) {
@@ -136,6 +138,7 @@ public class FileManagerController {
     }
 
     @GetMapping("preview")
+    @NotResultWrap
     public ResponseEntity<FileSystemResource> preview(@RequestParam("id") Long id) throws IOException {
         FileManager fileManager = fileManagerMapper.getFileManagerRecordById(id);
         if (fileManager == null || fileManager.getOriginalFileStoreUrl() == null) {
@@ -145,11 +148,45 @@ public class FileManagerController {
         if (!file.exists() || !file.isFile()) {
             return ResponseEntity.notFound().build();
         }
-        String contentType = Files.probeContentType(file.toPath());
+        String contentType = resolveContentType(file);
         MediaType mediaType = contentType == null ? MediaType.APPLICATION_OCTET_STREAM : MediaType.parseMediaType(contentType);
         return ResponseEntity.ok()
                 .contentType(mediaType)
+                .contentLength(file.length())
                 .body(new FileSystemResource(file));
+    }
+
+    private String resolveContentType(File file) throws IOException {
+        String contentType = Files.probeContentType(file.toPath());
+        if (contentType != null) {
+            return contentType;
+        }
+        String name = file.getName().toLowerCase();
+        if (name.endsWith(".jpg") || name.endsWith(".jpeg")) {
+            return "image/jpeg";
+        }
+        if (name.endsWith(".png")) {
+            return "image/png";
+        }
+        if (name.endsWith(".gif")) {
+            return "image/gif";
+        }
+        if (name.endsWith(".bmp")) {
+            return "image/bmp";
+        }
+        if (name.endsWith(".webp")) {
+            return "image/webp";
+        }
+        if (name.endsWith(".mp4")) {
+            return "video/mp4";
+        }
+        if (name.endsWith(".avi")) {
+            return "video/x-msvideo";
+        }
+        if (name.endsWith(".mov")) {
+            return "video/quicktime";
+        }
+        return null;
     }
 
 }

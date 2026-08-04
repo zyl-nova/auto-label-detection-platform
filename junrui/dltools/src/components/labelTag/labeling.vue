@@ -32,14 +32,14 @@
             </el-breadcrumb>
             <!-- 图片信息与切换开始 -->
             <div class="switch-img" >
-                <button>
+                <button @click="switchImage(-1)">
                     <svg-icon iconName="icon-arrow-left"></svg-icon>
                 </button>
                 <div style="display: flex;flex-direction:column;justify-content: center;">
-                    <span>图片名.jpg</span>
-                    <span>2/1000</span>
+                    <span>{{ currentFile?.name || '暂无图片' }}</span>
+                    <span>{{ currentFiles.length ? currentFileIndex + 1 : 0 }}/{{ currentFiles.length }}</span>
                 </div>
-                <button>
+                <button @click="switchImage(1)">
                     <svg-icon iconName="icon-arrow-right"></svg-icon>
                 </button>
             </div>
@@ -161,16 +161,46 @@
 </template>
 
 <script lang="ts" setup>
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import allStore from '@/stores'
 import { ArrowRight } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+import { useRoute } from 'vue-router'
 import { fabric  } from 'fabric'
 import { cloneDeep  } from 'lodash';
+import { getImageAnnotation, saveImageAnnotation } from '@/api/imageLabel'
 
 
 
 //统一导出pinia
-const {aside} = allStore()
+const {aside, business} = allStore()
+const route = useRoute()
+const currentFileIndex = ref(0)
+const currentTaskId = computed(() => Number(route.query.taskId || 0))
+const routeFileId = computed(() => Number(route.query.fileId || 0))
+const currentTask = computed(() => business.labelTasks.find((item) => item.id === currentTaskId.value))
+const currentFiles = computed(() => {
+    const taskFileIds = currentTask.value?.fileIds || (routeFileId.value ? [routeFileId.value] : [])
+    const files = taskFileIds
+        .map((id) => business.files.find((file) => file.id === id))
+        .filter(Boolean) as typeof business.files
+
+    if (!files.length && routeFileId.value) {
+        return [{
+            id: routeFileId.value,
+            name: `文件${routeFileId.value}`,
+            type: '图像',
+            projectId: 0,
+            projectName: '',
+            creator: '',
+            uploadTime: '',
+            source: '',
+            url: `/api/AIModuleServer/FileManager/preview?id=${routeFileId.value}`,
+        }]
+    }
+    return files.filter((file) => file.type === '图像')
+})
+const currentFile = computed(() => currentFiles.value[currentFileIndex.value])
 
 
 const drawShape = ref([
@@ -246,11 +276,13 @@ const generateRandomColor  = () => {
 }
 
 const generateColors = () => {
-    for (let i = 0; i < 10; i++) { // 生成10种颜色
+    const taskLabels = currentTask.value?.labels?.length ? currentTask.value.labels : ['wire', 'insulator']
+    labelList.value = []
+    for (let i = 0; i < taskLabels.length; i++) {
         let colorTmp = generateRandomColor()
         let l:labelType = {
-            cname:i+'',
-            ename:i+'',
+            cname: taskLabels[i],
+            ename: taskLabels[i],
             color:colorTmp,
             index:i
         } 
@@ -277,6 +309,12 @@ interface storeObj  {
     baseInfo:labelType
     shapeType:number
     fabricObj:fabric.Object
+}
+interface StoredAnnotation {
+    index:string
+    baseInfo:labelType
+    shapeType:number
+    fabricObj:any
 }
 const labelResults = ref<storeObj[]>([])
  //当前绘制图形的形状 200:绘制直线 201：绘制矩形 202：绘制圆 203：绘制多边形
@@ -324,23 +362,11 @@ const reviewResultsOptions = [
   
 ]
 
-const fileListDataTable = ref([
-    {
-        fileName:'测试1',
-        isLabeled:'是',
-        reviewResult:'待审核'
-    },
-    {
-        fileName:'测试2',
-        isLabeled:'否',
-        reviewResult:'通过'
-    },
-    {
-        fileName:'测试3',
-        isLabeled:'是',
-        reviewResult:'未通过'
-    }
-])
+const fileListDataTable = computed(() => currentFiles.value.map((file, index) => ({
+    fileName: file.name,
+    isLabeled: index === currentFileIndex.value && labelResults.value.length ? '是' : '否',
+    reviewResult: index === currentFileIndex.value ? '待审核' : '待标注',
+})))
 
 const changeHeaderCellStyle = () =>{
     let styleObject = {
@@ -430,6 +456,12 @@ const canvasParent = ref()
 const imageAddr = ref()
 const history:any[] = [];  // 历史记录
 
+const annotationStorageKey = () => {
+    const taskId = currentTaskId.value || 'local'
+    const fileId = currentFile.value?.id || routeFileId.value || 'unknown'
+    return `auto-label-detection:annotations:${taskId}:${fileId}`
+}
+
 //生成id
 const generateId = () => {
     return new Date().getTime().toString(36) + '-' + Math.random().toString(36).slice(2, 9)
@@ -508,7 +540,7 @@ const changeModel = (workModel:number) =>{
 
 //载入图片
 const loadImage = (url:string) => {
-    imageAddr.value = new URL(url, import.meta.url).href
+    imageAddr.value = url.startsWith('/api/') || url.startsWith('http') ? url : new URL(url, import.meta.url).href
     fabric.Image.fromURL(imageAddr.value, (img: any) => {
         let width = canvasParent.value.clientWidth
         let height = canvasParent.value.clientHeight
@@ -525,9 +557,87 @@ const loadImage = (url:string) => {
             img.top = (height - img.height) / 2
         }
         imageObj = img
-        fabricCanvas.setBackgroundImage(img, fabricCanvas.renderAll.bind(fabricCanvas))
+        fabricCanvas.clear()
+        fabricCanvas.setBackgroundImage(img, async () => {
+            await restoreSavedAnnotations()
+            fabricCanvas.renderAll()
+        })
         
     })
+}
+
+const normalizeAnnotationText = (value:any) => {
+    if (!value) return ''
+    return typeof value === 'string' ? value : JSON.stringify(value)
+}
+
+const restoreSavedAnnotations = async () => {
+    let raw = ''
+    const file = currentFile.value
+    if (currentTaskId.value && file?.id) {
+        try {
+            const record = await getImageAnnotation(currentTaskId.value, file.id)
+            raw = normalizeAnnotationText(record?.labelData)
+        } catch (error) {
+            raw = ''
+        }
+    }
+    if (!raw) {
+        raw = localStorage.getItem(annotationStorageKey()) || ''
+    }
+    if (!raw) return
+
+    try {
+        const annotations = JSON.parse(raw) as StoredAnnotation[]
+        if (!annotations.length) return
+
+        labelResults.value = []
+        const fabricObjects = annotations.map((item) => ({
+            ...item.fabricObj,
+            index: item.index,
+        }))
+
+        fabric.util.enlivenObjects(
+            fabricObjects,
+            function (objects:any[]) {
+                objects.forEach((object:any, index:number) => {
+                    const saved = annotations[index]
+                    object.index = saved.index
+                    object.selectable = currentWorkModel.value === 103
+                    fabricCanvas.add(object)
+                    labelResults.value.push({
+                        index: saved.index,
+                        baseInfo: saved.baseInfo,
+                        shapeType: saved.shapeType,
+                        fabricObj: object,
+                    })
+                })
+                save()
+                fabricCanvas.renderAll()
+            },
+            '',
+        )
+    } catch (error) {
+        console.error(error)
+        ElMessage.warning('读取本地标注缓存失败，可重新标注后保存')
+    }
+}
+
+const loadCurrentFile = () => {
+    labelResults.value = []
+    history.length = 0
+    const file = currentFile.value
+    if (file?.url) {
+        loadImage(file.url)
+        return
+    }
+    loadImage('../../assets/image/kj.jpg')
+}
+
+const switchImage = (step:number) => {
+    if (!currentFiles.value.length) return
+    currentFileIndex.value = (currentFileIndex.value + step + currentFiles.value.length) % currentFiles.value.length
+    loadCurrentFile()
 }
 
 //滚轮图片缩放
@@ -583,8 +693,43 @@ const handleResize = () => {
     }
 }
 
-const handleSave = () => {
-    console.log(imageObj, fabricCanvas.getObjects())
+const handleSave = async () => {
+    if (!currentFile.value) {
+        ElMessage.warning('当前没有可保存的图片')
+        return
+    }
+
+    const annotations: StoredAnnotation[] = labelResults.value.map((item) => ({
+        index: item.index,
+        baseInfo: item.baseInfo,
+        shapeType: item.shapeType,
+        fabricObj: item.fabricObj.toObject(['index']),
+    }))
+
+    localStorage.setItem(annotationStorageKey(), JSON.stringify(annotations))
+
+    if (currentTaskId.value && currentFile.value.id) {
+        try {
+            await saveImageAnnotation({
+                taskId: currentTaskId.value,
+                fileId: currentFile.value.id,
+                labelData: JSON.stringify(annotations),
+                labelList: JSON.stringify(labelList.value),
+                picStoreUrl: currentFile.value.url || '',
+            })
+        } catch (error) {
+            ElMessage.warning('后端暂不可用，标注结果已先保存到本地缓存')
+        }
+    }
+
+    if (currentTask.value) {
+        business.updateLabelTask(currentTask.value.id, {
+            status: '待审核',
+            progress: 80,
+        })
+    }
+
+    ElMessage.success(`已保存 ${annotations.length} 个标注结果`)
 }
 
 
@@ -1139,7 +1284,9 @@ onMounted(() => {
         deleteSelectedObject()
     }
     })
-    loadImage('../../assets/image/kj.jpg')
+    const routeFileIndex = currentFiles.value.findIndex((file) => file.id === routeFileId.value)
+    currentFileIndex.value = routeFileIndex >= 0 ? routeFileIndex : 0
+    loadCurrentFile()
 })
 
 

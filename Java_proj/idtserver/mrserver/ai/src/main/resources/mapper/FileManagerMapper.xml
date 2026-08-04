@@ -46,7 +46,7 @@
         left join conf_proj_tree_list cptl on cptl.id = tab.proj_id
         left join  sys_user su on su.id = tab.create_user_id
         where tab.logical_delete = 0
-        and cptl.logical_delete = 0
+        and (cptl.logical_delete = 0 or cptl.id is null)
         <if test="fileType != null and fileType >= 0">
             and tab.original_file_type = #{fileType}
         </if>

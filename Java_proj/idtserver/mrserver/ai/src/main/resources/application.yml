@@ -11,9 +11,9 @@ spring:
     locale: zh_CN
     time-zone: GMT+8
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/postgres?&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai}
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/auto_label_detection?&characterEncoding=UTF-8&rewriteBatchedStatements=true&allowMultiQueries=true&serverTimezone=Asia/Shanghai}
     username: ${DB_USERNAME:postgres}
-    password: ${DB_PASSWORD:postgres}
+    password: ${DB_PASSWORD:a1234567}
     driver-class-name: org.postgresql.Driver
   redis:
     database: 0
@@ -38,8 +38,10 @@ pagehelper:
   support-methods-arguments: true
 
 
-resources-path: static
+resources-path: D:/auto-label-detection-static
 models-path: modelFiles
 pics-path: pics2Train
 original-file-path: originalFiles
+python-command: python
+yolo-model-path: ${YOLO_MODEL_PATH:yolov8n.pt}
 

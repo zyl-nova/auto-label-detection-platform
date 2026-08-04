@@ -12,9 +12,29 @@
  Target Server Version : 160002 (160002)
  File Encoding         : 65001
 
- Date: 17/11/2024 22:20:20
+Date: 17/11/2024 22:20:20
 */
 
+-- ----------------------------
+-- Function structure for snow_next_id
+-- ----------------------------
+CREATE OR REPLACE FUNCTION "public"."snow_next_id"(OUT "result" int8)
+  RETURNS "pg_catalog"."int8" AS $BODY$
+DECLARE
+   our_epoch bigint := 1314220021721;
+   seq_id bigint;
+   now_millis bigint;
+   shard_id int := 5;
+BEGIN
+   seq_id := nextval('table_id_seq') % 1024;
+   SELECT FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000) INTO now_millis;
+   result := (now_millis - our_epoch) << 23;
+   result := result | (shard_id << 10);
+   result := result | (seq_id);
+END;
+$BODY$
+  LANGUAGE plpgsql VOLATILE
+  COST 100;
 
 -- ----------------------------
 -- Sequence structure for conf_model_center_tree_list_sort_seq
@@ -137,6 +157,20 @@ MAXVALUE 99999999
 START 1
 CACHE 1
 CYCLE ;
+
+-- ----------------------------
+-- Table structure for app_business_state
+-- ----------------------------
+DROP TABLE IF EXISTS "public"."app_business_state";
+CREATE TABLE "public"."app_business_state" (
+  "state_key" varchar(64) COLLATE "pg_catalog"."default" NOT NULL,
+  "state_data" jsonb,
+  "update_time" timestamp(6) without time zone
+);
+COMMENT ON COLUMN "public"."app_business_state"."state_key" IS '业务状态key';
+COMMENT ON COLUMN "public"."app_business_state"."state_data" IS '前端业务状态JSON';
+COMMENT ON COLUMN "public"."app_business_state"."update_time" IS '更新时间';
+COMMENT ON TABLE "public"."app_business_state" IS '应用业务状态缓存';
 
 -- ----------------------------
 -- Table structure for clientdetails
@@ -932,7 +966,6 @@ INSERT INTO "public"."sys_user_role" VALUES (1, 48, 6, NULL, NULL);
 -- ----------------------------
 -- Function structure for snow_next_id
 -- ----------------------------
-DROP FUNCTION IF EXISTS "public"."snow_next_id"(OUT "result" int8);
 CREATE OR REPLACE FUNCTION "public"."snow_next_id"(OUT "result" int8)
   RETURNS "pg_catalog"."int8" AS $BODY$
 DECLARE
@@ -1013,6 +1046,11 @@ SELECT setval('"public"."sys_user_role_id_seq"', 1, false);
 -- Alter sequences owned by
 -- ----------------------------
 SELECT setval('"public"."table_id_seq"', 366, true);
+
+-- ----------------------------
+-- Primary Key structure for table app_business_state
+-- ----------------------------
+ALTER TABLE "public"."app_business_state" ADD CONSTRAINT "app_business_state_pkey" PRIMARY KEY ("state_key");
 
 -- ----------------------------
 -- Primary Key structure for table clientdetails

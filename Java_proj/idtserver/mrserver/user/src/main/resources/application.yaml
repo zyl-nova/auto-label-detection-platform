@@ -11,9 +11,9 @@ spring:
     locale: zh_CN
     time-zone: GMT+8
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/postgres}
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/auto_label_detection}
     username: ${DB_USERNAME:postgres}
-    password: ${DB_PASSWORD:postgres}
+    password: ${DB_PASSWORD:a1234567}
     driver-class-name: org.postgresql.Driver
   redis:
     database: 0

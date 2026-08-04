@@ -118,6 +118,7 @@ import { ElMessage } from 'element-plus'
 import type { UploadFile } from 'element-plus'
 import allStore from '@/stores'
 import type { ModelItem } from '@/stores/businessStore'
+import { runYoloDetection } from '@/api/detection'
 
 type FileKind = 'image' | 'video' | ''
 
@@ -137,6 +138,7 @@ const modelKeyword = ref('')
 const { business } = allStore()
 const selectedModel = ref<ModelItem>()
 const sourceUrl = ref('')
+const sourceFile = ref<File>()
 const fileName = ref('')
 const fileKind = ref<FileKind>('')
 const running = ref(false)
@@ -176,33 +178,32 @@ const handleFileChange = (uploadFile: UploadFile) => {
   if (sourceUrl.value) URL.revokeObjectURL(sourceUrl.value)
 
   fileName.value = raw.name
+  sourceFile.value = raw
   sourceUrl.value = URL.createObjectURL(raw)
   fileKind.value = raw.type.startsWith('video') ? 'video' : 'image'
   results.value = []
 }
 
-const runDetection = () => {
+const runDetection = async () => {
   if (!selectedModel.value) {
     ElMessage.warning('请先选择模型')
     return
   }
-  if (!sourceUrl.value) {
+  if (!sourceUrl.value || !sourceFile.value) {
     ElMessage.warning('请先选择文件')
+    return
+  }
+  if (fileKind.value !== 'image') {
+    ElMessage.warning('当前先支持图片识别，视频识别后续会接抽帧流程')
     return
   }
 
   running.value = true
-  window.setTimeout(() => {
-    const labels = selectedModel.value?.targetType === '车辆'
-      ? ['car', 'truck']
-      : selectedModel.value?.targetType === '电线'
-        ? ['wire', 'insulator']
-        : ['cat', 'dog']
-
-    results.value = [
-      { id: 1, label: labels[0], confidence: 94, x: 18, y: 22, width: 34, height: 28 },
-      { id: 2, label: labels[1], confidence: 87, x: 56, y: 48, width: 25, height: 23 },
-    ]
+  try {
+    results.value = await runYoloDetection({
+      file: sourceFile.value,
+      conf: 0.25,
+    })
     business.addDetectionResults(results.value.map((item) => ({
       fileName: fileName.value,
       modelName: selectedModel.value?.name || '',
@@ -213,9 +214,13 @@ const runDetection = () => {
       width: item.width,
       height: item.height,
     })))
+    ElMessage.success(`识别完成，检测到 ${results.value.length} 个目标`)
+  } catch (error:any) {
+    const isTimeout = error?.code === 'ECONNABORTED' || `${error?.message || ''}`.toLowerCase().includes('timeout')
+    ElMessage.error(isTimeout ? '识别超时，首次加载YOLO模型可能较慢，请稍后重试' : error?.message || '识别失败，请检查后端和YOLO模型路径')
+  } finally {
     running.value = false
-    ElMessage.success('识别完成，结果已生成')
-  }, 900)
+  }
 }
 
 const boxStyle = (item: DetectionResult) => ({

@@ -18,6 +18,12 @@ junrui/dltools/node_modules/.tmp/
 Java_proj/idtserver/mrserver/**/target/
 
 # Local runtime uploads and generated model files
+static/
+yolov8n.pt
+*.pt
+*.onnx
+*.weights
+*.pth
 Java_proj/idtserver/mrserver/static/
 Java_proj/idtserver/static/
 Java_proj/idtserver/mrserver/**/static/
@@ -30,3 +36,4 @@ Java_proj/idtserver/mrserver/**/static/
 # Temporary files
 *.tmp
 *.temp
+Java_proj/idtserver/mrserver/ai/src/main/resources/scripts/ultralytics_config/

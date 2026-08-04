@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.idtserver.mrserver.mapper.BusinessStateMapper">
+    <resultMap id="BusinessState" type="com.idtserver.mrserver.dto.BusinessState">
+        <id column="state_key" jdbcType="VARCHAR" property="stateKey" />
+        <result column="state_data" jdbcType="VARCHAR" property="stateData" />
+        <result column="update_time" jdbcType="TIMESTAMP" property="updateTime" />
+    </resultMap>
+
+    <select id="getBusinessState" resultMap="BusinessState">
+        select
+            state_key,
+            CAST(state_data AS text) as state_data,
+            update_time
+        from app_business_state
+        where state_key = #{stateKey}
+        limit 1
+    </select>
+
+    <insert id="upsertBusinessState">
+        insert into app_business_state
+        (
+            state_key,
+            state_data,
+            update_time
+        )
+        values
+        (
+            #{stateKey},
+            CAST(#{stateData} AS jsonb),
+            now()
+        )
+        on conflict (state_key)
+        do update set
+            state_data = excluded.state_data,
+            update_time = now()
+    </insert>
+</mapper>

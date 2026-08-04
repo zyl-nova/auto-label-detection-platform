@@ -16,6 +16,8 @@ interface FileManagerRecord {
   id: string
   eName?: string
   cName?: string
+  ename?: string
+  cname?: string
   projId?: string
   projName?: string
   originalFileType?: number
@@ -49,7 +51,7 @@ export const mapFileRecord = (item: FileManagerRecord): ManagedFile => {
   const id = Number(item.id)
   return {
     id,
-    name: item.cName || item.eName || fileNameFromPath(item.originalFileStoreUrl) || `文件${item.id}`,
+    name: item.cName || item.cname || item.eName || item.ename || fileNameFromPath(item.originalFileStoreUrl) || `文件${item.id}`,
     type: codeToType(item.originalFileType),
     projectId: Number(item.projId || 0),
     projectName: item.projName || `项目${item.projId || ''}`,
@@ -86,7 +88,10 @@ export const uploadFileRecord = async (file: File, payload: { name: string; type
   form.append('chunkNumber', '0')
   form.append('totalChunks', '1')
   form.append('addFileUserId', '48')
-  await request.post('/AIModuleServer/FileManager/addFile', form)
+  const response = await request.post<ApiResult<string>>('/AIModuleServer/FileManager/addFile', form)
+  if (response.data.code !== 20000) {
+    throw new Error(response.data.message || '文件上传失败')
+  }
 }
 
 export const updateFileRecord = async (file: ManagedFile) => {

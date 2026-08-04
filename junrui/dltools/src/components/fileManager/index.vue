@@ -181,17 +181,21 @@ const saveFile = async () => {
 }
 
 const createLabelTask = (file: ManagedFile) => {
-  business.addLabelTask({
+  if (file.type !== '图像') {
+    ElMessage.warning('当前标注画布先支持图像文件，视频可先完成抽帧后再标注')
+    return
+  }
+  const task = business.addLabelTask({
     name: `${file.name}-标注任务`,
     projectId: file.projectId,
     projectName: file.projectName,
     fileIds: [file.id],
-    labels: file.type === '视频' ? ['car', 'truck'] : ['wire', 'insulator'],
+    labels: ['wire', 'insulator'],
     deadline: '',
     description: `由首页文件 ${file.name} 创建。`,
   })
-  ElMessage.success('已创建标注任务，可在“标注”页面查看')
-  router.push('/label')
+  ElMessage.success('已创建标注任务，正在进入标注页面')
+  router.push({ path: '/label/labeling', query: { taskId: String(task.id), fileId: String(file.id) } })
 }
 
 const removeFile = (id: number) => {

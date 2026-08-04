@@ -135,7 +135,9 @@ export const useBusinessStore = defineStore('business', {
       if (file) Object.assign(file, payload)
     },
     addLabelTask(payload: Omit<LabelTask, 'id' | 'status' | 'progress'>) {
-      this.labelTasks.unshift({ ...payload, id: this.createId(), status: '待标注', progress: 0 })
+      const task = { ...payload, id: this.createId(), status: '待标注' as TaskStatus, progress: 0 }
+      this.labelTasks.unshift(task)
+      return task
     },
     updateLabelTask(id: number, payload: Partial<Omit<LabelTask, 'id'>>) {
       const task = this.labelTasks.find((item) => item.id === id)

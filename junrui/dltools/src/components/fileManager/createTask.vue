@@ -54,9 +54,10 @@ const rawFile = ref<File>()
 const saving = ref(false)
 
 const projectOptions = [
-  { id: 2, name: 'Node 1.1' },
-  { id: 3, name: 'Node 1.2' },
-  { id: 6, name: 'Node 2.1' },
+  { id: 2, name: '防呆1-1' },
+  { id: 4, name: '防呆2-1' },
+  { id: 1, name: '项目1' },
+  { id: 3, name: '项目2' },
 ]
 
 const form = reactive({
