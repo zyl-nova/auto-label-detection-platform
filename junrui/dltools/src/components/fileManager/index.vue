@@ -17,6 +17,7 @@
     <el-table v-loading="loading" :data="filteredFiles" height="calc(100vh - 250px)" empty-text="暂无文件">
       <el-table-column prop="name" label="文件名" min-width="180" />
       <el-table-column prop="type" label="数据类型" width="100" />
+      <el-table-column prop="imageCount" label="样本数" width="90" />
       <el-table-column prop="uploadTime" label="上传时间" min-width="160" />
       <el-table-column prop="projectName" label="所属项目" min-width="130" />
       <el-table-column prop="creator" label="创建人" width="110" />
@@ -31,20 +32,28 @@
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="previewVisible" title="文件预览" width="720px">
+    <el-dialog v-model="previewVisible" title="文件预览" width="820px">
+      <div class="preview-meta">
+        <span>样本数：{{ previewTotal || 1 }}</span>
+        <span v-if="previewImages.length > 1">第 {{ previewIndex + 1 }} / {{ previewImages.length }} 张</span>
+        <span v-if="currentPreviewName" class="preview-name">{{ currentPreviewName }}</span>
+      </div>
       <div class="preview-box">
-        <img v-if="previewTarget?.type === '图像' && previewTarget.url && !previewError" :src="previewTarget.url" alt="preview" @error="previewError = true" />
-        <video v-else-if="previewTarget?.type === '视频' && previewTarget.url && !previewError" :src="previewTarget.url" controls @error="previewError = true" />
+        <el-button class="preview-nav left" circle :disabled="previewImages.length <= 1" @click="changePreviewIndex(-1)">‹</el-button>
+        <img v-if="isImagePreview && currentPreviewUrl && !previewError" :key="currentPreviewUrl" :src="currentPreviewUrl" alt="preview" @error="previewError = true" />
+        <video v-else-if="isVideoPreview && currentPreviewUrl && !previewError" :src="currentPreviewUrl" controls @error="previewError = true" />
         <el-empty v-else-if="previewError" description="原文件不存在或无法读取，请预览新上传的文件" />
         <el-empty v-else description="该文件暂无可预览资源" />
+        <el-button class="preview-nav right" circle :disabled="previewImages.length <= 1" @click="changePreviewIndex(1)">›</el-button>
       </div>
-      <div v-if="previewTarget?.url" class="preview-path">{{ previewTarget.url }}</div>
+      <div v-if="currentPreviewUrl" class="preview-path">{{ currentPreviewUrl }}</div>
     </el-dialog>
 
     <el-dialog v-model="detailVisible" title="文件详情" width="560px">
       <el-descriptions v-if="detailTarget" :column="1" border>
         <el-descriptions-item label="文件名">{{ detailTarget.name }}</el-descriptions-item>
         <el-descriptions-item label="数据类型">{{ detailTarget.type }}</el-descriptions-item>
+        <el-descriptions-item label="样本数">{{ detailTarget.imageCount || 1 }}</el-descriptions-item>
         <el-descriptions-item label="所属项目">{{ detailTarget.projectName }}</el-descriptions-item>
         <el-descriptions-item label="上传时间">{{ detailTarget.uploadTime }}</el-descriptions-item>
         <el-descriptions-item label="创建人">{{ detailTarget.creator }}</el-descriptions-item>
@@ -87,7 +96,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import allStore from '@/stores'
 import type { DataType, ManagedFile } from '@/stores/businessStore'
-import { deleteFileRecord, listFiles, typeToCode, updateFileRecord } from '@/api/fileManager'
+import { deleteFileRecord, listFiles, listPreviewImages, previewImageUrl, typeToCode, updateFileRecord } from '@/api/fileManager'
 
 const router = useRouter()
 const { business } = allStore()
@@ -96,6 +105,8 @@ const typeFilter = ref<DataType | '全部'>('全部')
 const previewVisible = ref(false)
 const previewTarget = ref<ManagedFile>()
 const previewError = ref(false)
+const previewImages = ref<string[]>([])
+const previewIndex = ref(0)
 const loading = ref(false)
 const offlineMode = ref(false)
 const detailVisible = ref(false)
@@ -117,6 +128,18 @@ const filteredFiles = computed(() => {
   })
 })
 
+const previewTotal = computed(() => previewImages.value.length || previewTarget.value?.imageCount || 0)
+const currentPreviewName = computed(() => previewImages.value[previewIndex.value] || previewTarget.value?.name || '')
+const currentPreviewUrl = computed(() => {
+  if (!previewTarget.value) return ''
+  if (previewImages.value.length > 0) {
+    return previewImageUrl(previewTarget.value.backendId || previewTarget.value.id, previewIndex.value)
+  }
+  return previewTarget.value.url || ''
+})
+const isImagePreview = computed(() => Boolean(previewTarget.value && typeToCode(previewTarget.value.type) === 0))
+const isVideoPreview = computed(() => Boolean(previewTarget.value && typeToCode(previewTarget.value.type) === 1))
+
 const loadFiles = async () => {
   loading.value = true
   try {
@@ -133,10 +156,27 @@ const loadFiles = async () => {
   }
 }
 
-const previewFile = (file: ManagedFile) => {
+const previewFile = async (file: ManagedFile) => {
   previewTarget.value = file
   previewError.value = false
+  previewImages.value = []
+  previewIndex.value = 0
+  if (typeToCode(file.type) === 0) {
+    try {
+      previewImages.value = await listPreviewImages(file.backendId || file.id)
+      offlineMode.value = false
+    } catch (error) {
+      offlineMode.value = true
+    }
+  }
   previewVisible.value = true
+}
+
+const changePreviewIndex = (step: number) => {
+  if (previewImages.value.length <= 1) return
+  const total = previewImages.value.length
+  previewIndex.value = (previewIndex.value + step + total) % total
+  previewError.value = false
 }
 
 const openDetail = (file: ManagedFile) => {
@@ -195,14 +235,22 @@ const createLabelTask = (file: ManagedFile) => {
     description: `由首页文件 ${file.name} 创建。`,
   })
   ElMessage.success('已创建标注任务，正在进入标注页面')
-  router.push({ path: '/label/labeling', query: { taskId: String(task.id), fileId: String(file.id) } })
+  router.push({
+    path: '/label/labeling',
+    query: {
+      taskId: String(task.id),
+      fileId: String(file.id),
+      backendId: file.backendId || String(file.id),
+    },
+  })
 }
 
 const removeFile = (id: number) => {
   ElMessageBox.confirm('确认删除该文件记录？', '删除文件', { type: 'warning' })
     .then(async () => {
       try {
-        await deleteFileRecord(id)
+        const file = business.files.find((item) => item.id === id)
+        await deleteFileRecord(file?.backendId || id)
         offlineMode.value = false
       } catch (error) {
         offlineMode.value = true
@@ -234,11 +282,41 @@ onMounted(loadFiles)
 }
 
 .preview-box {
+  position: relative;
   min-height: 320px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: #111827;
+}
+
+.preview-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 10px;
+  color: #344054;
+  font-size: 14px;
+}
+
+.preview-name {
+  color: #667085;
+  word-break: break-all;
+}
+
+.preview-nav {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  transform: translateY(-50%);
+}
+
+.preview-nav.left {
+  left: 14px;
+}
+
+.preview-nav.right {
+  right: 14px;
 }
 
 .preview-box img,

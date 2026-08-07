@@ -8,13 +8,15 @@ interface ApiResult<T> {
 
 export interface SavedAnnotationRecord {
   id?: string
+  imageIndex?: number
   labelData?: string
   labelList?: string
 }
 
 export const saveImageAnnotation = async (payload: {
   taskId: number
-  fileId: number
+  fileId: string | number
+  imageIndex: number
   labelData: string
   labelList: string
   picStoreUrl?: string
@@ -22,9 +24,9 @@ export const saveImageAnnotation = async (payload: {
   await request.post<ApiResult<number>>('/AIModuleServer/ImageLabel/saveAnnotation', payload)
 }
 
-export const getImageAnnotation = async (taskId: number, fileId: number) => {
+export const getImageAnnotation = async (taskId: number, fileId: string | number, imageIndex = 0) => {
   const response = await request.get<ApiResult<SavedAnnotationRecord | null>>('/AIModuleServer/ImageLabel/annotation', {
-    params: { taskId, fileId },
+    params: { taskId, fileId, imageIndex },
   })
   return response.data.data
 }

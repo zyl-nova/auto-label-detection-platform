@@ -1,8 +1,10 @@
+import argparse
 import json
 import os
 import sys
 import time
 from pathlib import Path
+
 import cv2
 
 config_dir = Path(os.environ.get("YOLO_CONFIG_DIR", Path(__file__).resolve().parent / "ultralytics_config"))
@@ -11,167 +13,132 @@ os.environ["YOLO_CONFIG_DIR"] = str(config_dir)
 
 from ultralytics import YOLO
 
-# ====================== 配置路径 ======================
-model_path = "D:/project3/yolov8n.pt"
-watch_dir = "C:/Users/zylmy/Pictures/2026_08_04"
-conf_threshold = 0.25
 
-# ========== 结果保存路径 ==========
-OUTPUT_FOLDER = "D:/project3/auto-label-detection-platform-main/results"
-os.makedirs(OUTPUT_FOLDER, exist_ok=True)
-# ==================================
-
-# 全局只加载一次模型
-print(f"📁 监听文件夹: {watch_dir}")
-print(f"📁 输出文件夹: {OUTPUT_FOLDER}")
-print(f"🤖 模型路径: {model_path}")
-print("✅ 开始监听（轮询模式，每2秒扫描一次）...\n")
-
-model = YOLO(model_path)
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
 
-def detect_single_image(img_path: str):
-    """检测单张图片，返回检测结果和标注后的图片"""
-    image = cv2.imread(img_path)
+def parse_args():
+    parser = argparse.ArgumentParser(description="Watch a camera import folder and run YOLO detection.")
+    parser.add_argument("--watch-dir", required=True)
+    parser.add_argument("--output-dir", required=True)
+    parser.add_argument("--model", required=True)
+    parser.add_argument("--conf", type=float, default=0.25)
+    parser.add_argument("--interval", type=float, default=2.0)
+    return parser.parse_args()
+
+
+def image_files(folder: Path):
+    if not folder.exists():
+        return []
+    return [
+        path for path in folder.iterdir()
+        if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
+    ]
+
+
+def wait_until_complete(path: Path):
+    try:
+        first_size = path.stat().st_size
+        time.sleep(0.3)
+        return first_size > 0 and first_size == path.stat().st_size
+    except OSError:
+        return False
+
+
+def detect_single_image(model, image_path: Path, confidence: float):
+    image = cv2.imread(str(image_path))
     if image is None:
-        return {"image": os.path.basename(img_path), "detections": []}, None, None
+        return {"image": image_path.name, "detections": []}, None, None
 
-    h, w = image.shape[:2]
-    results = model.predict(source=img_path, conf=conf_threshold, verbose=False)
-
+    height, width = image.shape[:2]
+    predictions = model.predict(source=str(image_path), conf=confidence, verbose=False)
     detections = []
     next_id = 1
-    for r in results:
-        for box in r.boxes:
-            cls_id = int(box.cls[0])
-            conf = float(box.conf[0])
+    for prediction in predictions:
+        for box in prediction.boxes:
+            class_id = int(box.cls[0])
+            score = float(box.conf[0])
             x1, y1, x2, y2 = box.xyxy[0].tolist()
-
             detections.append({
                 "id": next_id,
-                "label": r.names[cls_id],
-                "confidence": round(conf * 100, 2),
-                "x": round(x1 / w * 100, 2),
-                "y": round(y1 / h * 100, 2),
-                "width": round((x2 - x1) / w * 100, 2),
-                "height": round((y2 - y1) / h * 100, 2),
+                "label": prediction.names[class_id],
+                "confidence": round(score * 100, 2),
+                "x": round(x1 / width * 100, 2),
+                "y": round(y1 / height * 100, 2),
+                "width": round((x2 - x1) / width * 100, 2),
+                "height": round((y2 - y1) / height * 100, 2),
             })
             next_id += 1
 
-    annotated_img = results[0].plot() if results else None
-    return {"image": os.path.basename(img_path), "detections": detections}, annotated_img, image
+    annotated_image = predictions[0].plot() if predictions else image.copy()
+    return {"image": image_path.name, "detections": detections}, annotated_image, image
 
 
-def save_to_results(filename: str, detections: list, annotated_img, original_img):
-    """保存检测结果到 results 文件夹"""
+def save_result(output_dir: Path, filename: str, result, annotated_image, original_image):
+    detected_path = output_dir / f"det_{filename}"
+    original_path = output_dir / f"orig_{filename}"
+    json_path = output_dir / f"det_{Path(filename).stem}.json"
 
-    det_img_path = os.path.join(OUTPUT_FOLDER, f"det_{filename}")
-    cv2.imwrite(det_img_path, annotated_img)
-    print(f"✅ 带框图片已保存: {det_img_path}", file=sys.stderr)
+    cv2.imwrite(str(detected_path), annotated_image)
+    cv2.imwrite(str(original_path), original_image)
 
-    orig_img_path = os.path.join(OUTPUT_FOLDER, f"orig_{filename}")
-    cv2.imwrite(orig_img_path, original_img)
-    print(f"✅ 原图已保存: {orig_img_path}", file=sys.stderr)
-
-    json_filename = f"det_{os.path.splitext(filename)[0]}.json"
-    output_json_path = os.path.join(OUTPUT_FOLDER, json_filename)
-
-    result_data = {
-        "filename": filename,
-        "originalImage": f"/results/orig_{filename}",
-        "detectedImage": f"/results/det_{filename}",
-        "detections": []
-    }
-
-    for det in detections:
-        x = det.get("x", 0)
-        y = det.get("y", 0)
-        width = det.get("width", 0)
-        height = det.get("height", 0)
-
-        result_data["detections"].append({
-            "class": det.get("label", "unknown"),
-            "confidence": det.get("confidence", 0) / 100,
-            "bbox": [x, y, x + width, y + height]
+    detections = []
+    for item in result.get("detections", []):
+        x = item.get("x", 0)
+        y = item.get("y", 0)
+        width = item.get("width", 0)
+        height = item.get("height", 0)
+        detections.append({
+            "class": item.get("label", "unknown"),
+            "confidence": item.get("confidence", 0) / 100,
+            "bbox": [x, y, x + width, y + height],
         })
 
-    with open(output_json_path, 'w', encoding='utf-8') as f:
-        json.dump(result_data, f, ensure_ascii=False, indent=2)
-    print(f"✅ JSON 已保存: {output_json_path}", file=sys.stderr)
+    payload = {
+        "filename": filename,
+        "originalImage": f"/results/{original_path.name}",
+        "detectedImage": f"/results/{detected_path.name}",
+        "detections": detections,
+    }
+    json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def main():
-    processed_files = set()
-    scan_interval = 2  # 扫描间隔（秒）
+    args = parse_args()
+    watch_dir = Path(args.watch_dir).resolve()
+    output_dir = Path(args.output_dir).resolve()
+    watch_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"Watching: {watch_dir}", flush=True)
+    print(f"Results: {output_dir}", flush=True)
+    print(f"Model: {args.model}", flush=True)
+
+    model = YOLO(args.model)
+    processed = {str(path.resolve()) for path in image_files(watch_dir)}
 
     while True:
         try:
-            exts = ('.jpg', '.jpeg', '.png', '.bmp', '.webp')
-
-            # 扫描文件夹
-            for filename in os.listdir(watch_dir):
-                if not filename.lower().endswith(exts):
+            for image_path in image_files(watch_dir):
+                resolved = str(image_path.resolve())
+                if resolved in processed or not wait_until_complete(image_path):
                     continue
-
-                file_path = os.path.join(watch_dir, filename)
-
-                # 跳过已处理的文件
-                if file_path in processed_files:
-                    continue
-
-                # 检查文件是否存在
-                if not os.path.exists(file_path):
-                    continue
-
-                # 检查文件是否完整（等待写入完成）
-                try:
-                    size1 = os.path.getsize(file_path)
-                    time.sleep(0.3)
-                    size2 = os.path.getsize(file_path)
-                    if size1 != size2 or size1 == 0:
-                        continue  # 文件还在写入或为空
-                except:
-                    continue
-
-                # 检查是否是图片
-                try:
-                    img = cv2.imread(file_path)
-                    if img is None:
-                        continue
-                except:
-                    continue
-
-                print(f"📷 发现新图片: {filename}", file=sys.stderr)
-
-                # 检测图片
-                res, annotated_img, original_img = detect_single_image(file_path)
-
-                # 输出到控制台
-                print(json.dumps({"type": "real_time", "data": res}, ensure_ascii=False))
-                sys.stdout.flush()
-
-                if annotated_img is not None and original_img is not None:
-                    save_to_results(filename, res.get("detections", []), annotated_img, original_img)
-                    print(f"✅ 检测完成: {filename}\n", file=sys.stderr)
-                else:
-                    print(f"❌ 检测失败: {filename}", file=sys.stderr)
-
-                # 标记为已处理
-                processed_files.add(file_path)
-
-            time.sleep(scan_interval)
-
+                result, annotated_image, original_image = detect_single_image(model, image_path, args.conf)
+                if annotated_image is not None and original_image is not None:
+                    save_result(output_dir, image_path.name, result, annotated_image, original_image)
+                    print(json.dumps({"type": "real_time", "data": result}, ensure_ascii=False), flush=True)
+                processed.add(resolved)
+            time.sleep(max(0.5, args.interval))
         except KeyboardInterrupt:
-            print("\n👋 已退出", file=sys.stderr)
             break
-        except Exception as e:
-            print(f"❌ 错误: {e}", file=sys.stderr)
-            time.sleep(scan_interval)
+        except Exception as error:
+            print(f"Camera watcher error: {error}", file=sys.stderr, flush=True)
+            time.sleep(max(0.5, args.interval))
 
 
 if __name__ == "__main__":
     try:
         main()
-    except Exception as e:
-        print(json.dumps({"error": str(e)}, ensure_ascii=False), file=sys.stderr)
+    except Exception as error:
+        print(json.dumps({"error": str(error)}, ensure_ascii=False), file=sys.stderr)
         sys.exit(1)

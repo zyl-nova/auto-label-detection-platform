@@ -12,7 +12,10 @@ public interface ImageLabelMapper {
     List<FileManager> getAllFileManagerList(@Param("projId") String projId);
 
     MapLabelTaskPicsToUser getSavedAnnotation(@Param("taskId") Long taskId,
-                                              @Param("fileId") Long fileId);
+                                              @Param("fileId") Long fileId,
+                                              @Param("imageIndex") Integer imageIndex);
+
+    List<MapLabelTaskPicsToUser> getAnnotationsForTask(@Param("taskId") Long taskId);
 
     int createAnnotation(MapLabelTaskPicsToUser annotation);
 

@@ -9,6 +9,7 @@ public class MapLabelTaskPicsToUser {
     String id;
     String infoFilesManagerInfoId;
     String infoLabelTaskId;
+    Integer imageIndex;
     String labelData;
     String labelList;
     String mapLabelTaskUserTabId;

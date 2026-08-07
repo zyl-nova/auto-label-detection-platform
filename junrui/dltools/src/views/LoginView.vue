@@ -32,12 +32,11 @@
             })
             if (response.data.code == 200) {
                 localStorage.setItem('jwt_token', response.data.data);
-                router.push('/home')
+                router.push('/fileManager')
             }
         } catch (error) {
           console.error('Login error:', error);
-        }   
+        }
     }
-  
+
   </script>
-  

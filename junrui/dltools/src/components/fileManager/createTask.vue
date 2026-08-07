@@ -79,6 +79,11 @@ const handleFileChange = (file: UploadFile) => {
   rawFile.value = file.raw
   form.name = file.raw.name
   form.url = URL.createObjectURL(file.raw)
+  const fileName = file.raw.name.toLowerCase()
+  if (fileName.endsWith('.zip')) {
+    form.type = '图像'
+    return
+  }
   if (file.raw.type.startsWith('video')) form.type = '视频'
   if (file.raw.type.startsWith('image')) form.type = '图像'
 }
@@ -88,12 +93,28 @@ const handleRemove = () => {
   form.url = ''
 }
 
+const uploadErrorMessage = (error: any) => {
+  const status = error?.response?.status
+  const serverMessage = error?.response?.data?.message
+  if (status === 413) return '压缩包超过后端允许的 500MB 上限'
+  if (error?.code === 'ECONNABORTED' || `${error?.message || ''}`.toLowerCase().includes('timeout')) {
+    return '压缩包处理超时，请检查压缩包是否损坏或包含过多大图'
+  }
+  if (serverMessage) return `上传失败：${serverMessage}`
+  if (error?.code === 'ERR_NETWORK') return '无法连接后端，请确认 AI 后端已启动'
+  return `上传失败：${error?.message || '未知错误'}`
+}
+
 const submitForm = async (formEl?: FormInstance) => {
   if (!formEl) return
   await formEl.validate(async (valid) => {
     if (!valid) return
     if (!rawFile.value) {
       ElMessage.warning('请选择要上传的文件')
+      return
+    }
+    if (rawFile.value.size > 500 * 1024 * 1024) {
+      ElMessage.warning('文件不能超过 500MB')
       return
     }
     const project = projectOptions.find((item) => item.id === form.projectId) || projectOptions[0]
@@ -115,7 +136,7 @@ const submitForm = async (formEl?: FormInstance) => {
         projectName: project.name,
         url: form.url,
       })
-      ElMessage.warning('后端暂不可用，已先保存到当前页面缓存')
+      ElMessage.warning(`${uploadErrorMessage(error)}，已先保存到当前页面缓存`)
       router.push('/fileManager')
     } finally {
       saving.value = false
