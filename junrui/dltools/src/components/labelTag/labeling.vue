@@ -5,7 +5,7 @@
             <div class="create-shape">
                 <span>创建形状</span>
                 <div class="create-shape-button">
-                    <button  v-for="item in drawShape" @click="changeModel(item.workModel)">
+                    <button v-for="item in drawShape" :class="{ active: currentWorkModel === item.workModel }" :title="item.name" @click="changeModel(item.workModel)">
                         <svg-icon :iconName="item.iconName"  ></svg-icon>
                     </button>
                 </div>
@@ -16,7 +16,7 @@
             <div class="tool-box">
                 <span>工具箱</span>
                 <div class="tool-box-button">
-                    <button  v-for="item in toolboxButton" @click="changeModel(item.workModel)">
+                    <button v-for="item in toolboxButton" :class="{ active: currentWorkModel === item.workModel }" :title="item.name" @click="changeModel(item.workModel)">
                         <svg-icon :iconName="item.iconName"  ></svg-icon>
                     </button>
                 </div>
@@ -147,6 +147,7 @@
                         style="width: 100%"
                         :header-cell-style=changeHeaderCellStyle
                         :cell-style=changeCellStyle
+                        @row-click="selectFileRow"
                         >
                             <el-table-column prop="fileName" label="文件名"  />
                             <el-table-column prop="isLabeled" label="是否标注"  />
@@ -169,6 +170,8 @@ import { useRoute } from 'vue-router'
 import { fabric  } from 'fabric'
 import { cloneDeep  } from 'lodash';
 import { getImageAnnotation, saveImageAnnotation } from '@/api/imageLabel'
+import { listPreviewImages, previewImageUrl } from '@/api/fileManager'
+import type { ManagedFile } from '@/stores/businessStore'
 
 
 
@@ -178,16 +181,21 @@ const route = useRoute()
 const currentFileIndex = ref(0)
 const currentTaskId = computed(() => Number(route.query.taskId || 0))
 const routeFileId = computed(() => Number(route.query.fileId || 0))
+const routeBackendId = computed(() => String(route.query.backendId || route.query.fileId || ''))
 const currentTask = computed(() => business.labelTasks.find((item) => item.id === currentTaskId.value))
-const currentFiles = computed(() => {
+type LabelingFile = ManagedFile & { imageIndex: number }
+const currentFiles = ref<LabelingFile[]>([])
+
+const loadTaskImages = async () => {
     const taskFileIds = currentTask.value?.fileIds || (routeFileId.value ? [routeFileId.value] : [])
     const files = taskFileIds
         .map((id) => business.files.find((file) => file.id === id))
         .filter(Boolean) as typeof business.files
 
     if (!files.length && routeFileId.value) {
-        return [{
+        files.push({
             id: routeFileId.value,
+            backendId: routeBackendId.value,
             name: `文件${routeFileId.value}`,
             type: '图像',
             projectId: 0,
@@ -196,27 +204,55 @@ const currentFiles = computed(() => {
             uploadTime: '',
             source: '',
             url: `/api/AIModuleServer/FileManager/preview?id=${routeFileId.value}`,
-        }]
+        })
     }
-    return files.filter((file) => file.type === '图像')
-})
+
+    const images: LabelingFile[] = []
+    for (const file of files.filter((item) => item.type === '图像')) {
+        const backendId = file.backendId || String(file.id)
+        try {
+            const names = await listPreviewImages(backendId)
+            if (names.length) {
+                names.forEach((name, imageIndex) => {
+                    images.push({
+                        ...file,
+                        backendId,
+                        imageIndex,
+                        imageName: name,
+                        name,
+                        url: previewImageUrl(backendId, imageIndex),
+                    })
+                })
+                continue
+            }
+        } catch (error) {
+            console.warn('读取压缩包图片列表失败，将按单张图片载入。', error)
+        }
+        images.push({ ...file, backendId, imageIndex: 0 })
+    }
+    currentFiles.value = images
+}
 const currentFile = computed(() => currentFiles.value[currentFileIndex.value])
 
 
 const drawShape = ref([
     {
+        name: '直线标注',
         iconName: 'icon-edit-line',
         workModel: 200
     },
     {
+        name: '矩形标注',
         iconName: 'icon-juxing',
         workModel: 201
     },
     {
+        name: '圆形标注',
         iconName: 'icon-big-circle',
         workModel: 202
     },
     {
+        name: '多边形标注',
         iconName: 'icon-huaduobianxing',
         workModel: 203
     },
@@ -224,22 +260,27 @@ const drawShape = ref([
 
 const toolboxButton = ref([
     {
+        name: '复制',
         iconName: 'icon-fuzhi',
         workModel: 100
     },
     {
+        name: '缩小',
         iconName: 'icon-suoxiao',
         workModel: 101
     },
     {
+        name: '放大',
         iconName: 'icon-fangda',
         workModel: 102
     },
     {
+        name: '选择、移动和缩放',
         iconName: 'icon-zhuashou',
         workModel: 103
     },
     {
+        name: '撤销',
         iconName: 'icon-fanhui',
         workModel: 104
     },
@@ -316,6 +357,12 @@ interface StoredAnnotation {
     shapeType:number
     fabricObj:any
 }
+interface StoredAnnotationDocument {
+    version:2
+    canvas:{width:number, height:number}
+    image:{left:number, top:number, width:number, height:number}
+    annotations:StoredAnnotation[]
+}
 const labelResults = ref<storeObj[]>([])
  //当前绘制图形的形状 200:绘制直线 201：绘制矩形 202：绘制圆 203：绘制多边形
 const currentDrawType = ref(202) 
@@ -362,10 +409,14 @@ const reviewResultsOptions = [
   
 ]
 
-const fileListDataTable = computed(() => currentFiles.value.map((file, index) => ({
+const labeledImageKeys = ref<string[]>([])
+const imageKey = (file: LabelingFile) => `${file.backendId || file.id}:${file.imageIndex}`
+
+const fileListDataTable = computed(() => currentFiles.value.map((file, rowIndex) => ({
+    rowIndex,
     fileName: file.name,
-    isLabeled: index === currentFileIndex.value && labelResults.value.length ? '是' : '否',
-    reviewResult: index === currentFileIndex.value ? '待审核' : '待标注',
+    isLabeled: labeledImageKeys.value.includes(imageKey(file)) ? '是' : '否',
+    reviewResult: labeledImageKeys.value.includes(imageKey(file)) ? '待审核' : '待标注',
 })))
 
 const changeHeaderCellStyle = () =>{
@@ -456,10 +507,31 @@ const canvasParent = ref()
 const imageAddr = ref()
 const history:any[] = [];  // 历史记录
 
-const annotationStorageKey = () => {
+const annotationStorageKey = (file = currentFile.value) => {
     const taskId = currentTaskId.value || 'local'
-    const fileId = currentFile.value?.id || routeFileId.value || 'unknown'
-    return `auto-label-detection:annotations:${taskId}:${fileId}`
+    const fileId = file?.backendId || file?.id || routeBackendId.value || 'unknown'
+    const imageIndex = file?.imageIndex || 0
+    return `auto-label-detection:annotations:${taskId}:${fileId}:${imageIndex}`
+}
+
+const loadLabeledStates = async () => {
+    const keys = await Promise.all(currentFiles.value.map(async (file) => {
+        if (localStorage.getItem(annotationStorageKey(file)) !== null) {
+            return imageKey(file)
+        }
+        if (!currentTaskId.value) return ''
+        try {
+            const record = await getImageAnnotation(
+                currentTaskId.value,
+                file.backendId || file.id,
+                file.imageIndex,
+            )
+            return record ? imageKey(file) : ''
+        } catch (error) {
+            return ''
+        }
+    }))
+    labeledImageKeys.value = keys.filter(Boolean)
 }
 
 //生成id
@@ -497,6 +569,36 @@ const scale = ref()
 //加载图片对象
 let imageObj:any = null
 
+const getImageBounds = () => {
+    if (!imageObj) return { left: 0, top: 0, width: 0, height: 0, right: 0, bottom: 0 }
+    const left = imageObj.left || 0
+    const top = imageObj.top || 0
+    const width = imageObj.getScaledWidth?.() || (imageObj.width || 0) * (imageObj.scaleX || 1)
+    const height = imageObj.getScaledHeight?.() || (imageObj.height || 0) * (imageObj.scaleY || 1)
+    return { left, top, width, height, right: left + width, bottom: top + height }
+}
+
+const setAnnotationEditable = (object:any, editable:boolean) => {
+    object.set({
+        selectable: editable,
+        evented: editable,
+        hasControls: editable,
+        hasBorders: editable,
+        lockRotation: true,
+        lockScalingFlip: true,
+        transparentCorners: false,
+        cornerColor: '#ffffff',
+        cornerStrokeColor: '#2563eb',
+        borderColor: '#2563eb',
+        cornerStyle: 'circle',
+        cornerSize: 12,
+        touchCornerSize: 22,
+        padding: 2,
+    })
+    object.setControlsVisibility?.({ mtr: false })
+    object.setCoords()
+}
+
 
 //切换成移动模式
 const changeModel = (workModel:number) =>{
@@ -513,8 +615,10 @@ const changeModel = (workModel:number) =>{
         case 103:
             currentWorkModel.value = workModel
             objects.forEach((o:any) => {
-                o.set('selectable', true)
-            })  
+                setAnnotationEditable(o, true)
+            })
+            fabricCanvas.defaultCursor = 'default'
+            fabricCanvas.hoverCursor = 'move'
             break
         case 104:
             undo()
@@ -530,9 +634,11 @@ const changeModel = (workModel:number) =>{
             currentDrawType.value = workModel
             currentWorkModel.value = workModel
             objects.forEach((o:any) => {
-                o.set('selectable', false)
-                new Promise(() => setTimeout(() => {fabricCanvas.renderAll()}, 50)) ;
+                setAnnotationEditable(o, false)
             })
+            fabricCanvas.discardActiveObject()
+            fabricCanvas.defaultCursor = 'crosshair'
+            fabricCanvas.renderAll()
             break
     }    
 }
@@ -571,24 +677,43 @@ const normalizeAnnotationText = (value:any) => {
     return typeof value === 'string' ? value : JSON.stringify(value)
 }
 
+const parseStoredAnnotations = (raw:string) => {
+    const saved = JSON.parse(raw) as StoredAnnotation[] | StoredAnnotationDocument
+    return Array.isArray(saved) ? saved : saved.annotations || []
+}
+
 const restoreSavedAnnotations = async () => {
     let raw = ''
     const file = currentFile.value
+    let hasSavedRecord = false
     if (currentTaskId.value && file?.id) {
         try {
-            const record = await getImageAnnotation(currentTaskId.value, file.id)
+            const record = await getImageAnnotation(
+                currentTaskId.value,
+                file.backendId || file.id,
+                file.imageIndex,
+            )
+            hasSavedRecord = Boolean(record)
             raw = normalizeAnnotationText(record?.labelData)
         } catch (error) {
             raw = ''
         }
     }
     if (!raw) {
-        raw = localStorage.getItem(annotationStorageKey()) || ''
+        const localRecord = localStorage.getItem(annotationStorageKey(file))
+        hasSavedRecord = hasSavedRecord || localRecord !== null
+        raw = localRecord || ''
+    }
+    if (hasSavedRecord && file) {
+        const key = imageKey(file)
+        if (!labeledImageKeys.value.includes(key)) {
+            labeledImageKeys.value = [...labeledImageKeys.value, key]
+        }
     }
     if (!raw) return
 
     try {
-        const annotations = JSON.parse(raw) as StoredAnnotation[]
+        const annotations = parseStoredAnnotations(raw)
         if (!annotations.length) return
 
         labelResults.value = []
@@ -603,7 +728,7 @@ const restoreSavedAnnotations = async () => {
                 objects.forEach((object:any, index:number) => {
                     const saved = annotations[index]
                     object.index = saved.index
-                    object.selectable = currentWorkModel.value === 103
+                    setAnnotationEditable(object, currentWorkModel.value === 103)
                     fabricCanvas.add(object)
                     labelResults.value.push({
                         index: saved.index,
@@ -637,6 +762,12 @@ const loadCurrentFile = () => {
 const switchImage = (step:number) => {
     if (!currentFiles.value.length) return
     currentFileIndex.value = (currentFileIndex.value + step + currentFiles.value.length) % currentFiles.value.length
+    loadCurrentFile()
+}
+
+const selectFileRow = (row: { rowIndex: number }) => {
+    if (row.rowIndex === currentFileIndex.value) return
+    currentFileIndex.value = row.rowIndex
     loadCurrentFile()
 }
 
@@ -687,6 +818,37 @@ const deleteSelectedObject  = () => {
     save()
 }
 
+const handleCanvasKeydown = (event:KeyboardEvent) => {
+    const target = event.target as HTMLElement | null
+    if (target?.matches('input, textarea, select') || target?.isContentEditable) return
+
+    if(event.key === 'Delete' || event.key === 'Backspace'){
+        event.preventDefault()
+        deleteSelectedObject()
+        return
+    }
+
+    const movement:Record<string, [number, number]> = {
+        ArrowLeft: [-1, 0],
+        ArrowRight: [1, 0],
+        ArrowUp: [0, -1],
+        ArrowDown: [0, 1],
+    }
+    const direction = movement[event.key]
+    const activeObject = fabricCanvas?.getActiveObject()
+    if (!direction || !activeObject || currentWorkModel.value !== 103) return
+
+    event.preventDefault()
+    const distance = event.shiftKey ? 10 : 1
+    activeObject.set({
+        left: (activeObject.left || 0) + direction[0] * distance,
+        top: (activeObject.top || 0) + direction[1] * distance,
+    })
+    limitObjectToBackground(activeObject)
+    fabricCanvas.requestRenderAll()
+    save()
+}
+
 const handleResize = () => {
     if(fabricCanvas ){
         fabricCanvas.setDimensions({width:canvasParent.value.clientWidth, height:canvasParent.value.clientHeight})
@@ -705,21 +867,42 @@ const handleSave = async () => {
         shapeType: item.shapeType,
         fabricObj: item.fabricObj.toObject(['index']),
     }))
+    const annotationDocument: StoredAnnotationDocument = {
+        version: 2,
+        canvas: {
+            width: fabricCanvas.getWidth(),
+            height: fabricCanvas.getHeight(),
+        },
+        image: {
+            left: imageObj?.left || 0,
+            top: imageObj?.top || 0,
+            width: imageObj?.getScaledWidth?.() || imageObj?.width || 0,
+            height: imageObj?.getScaledHeight?.() || imageObj?.height || 0,
+        },
+        annotations,
+    }
+    const annotationData = JSON.stringify(annotationDocument)
 
-    localStorage.setItem(annotationStorageKey(), JSON.stringify(annotations))
+    localStorage.setItem(annotationStorageKey(currentFile.value), annotationData)
 
     if (currentTaskId.value && currentFile.value.id) {
         try {
             await saveImageAnnotation({
                 taskId: currentTaskId.value,
-                fileId: currentFile.value.id,
-                labelData: JSON.stringify(annotations),
+                fileId: currentFile.value.backendId || currentFile.value.id,
+                imageIndex: currentFile.value.imageIndex,
+                labelData: annotationData,
                 labelList: JSON.stringify(labelList.value),
                 picStoreUrl: currentFile.value.url || '',
             })
         } catch (error) {
             ElMessage.warning('后端暂不可用，标注结果已先保存到本地缓存')
         }
+    }
+
+    const savedKey = imageKey(currentFile.value)
+    if (!labeledImageKeys.value.includes(savedKey)) {
+        labeledImageKeys.value = [...labeledImageKeys.value, savedKey]
     }
 
     if (currentTask.value) {
@@ -772,7 +955,10 @@ const drawRect = (pointer:any) => {
             width: width,
             height: height,
             angle: 0,
-            fill: currentBaseInfo.color+'80',
+            fill: currentBaseInfo.color+'20',
+            stroke: currentBaseInfo.color,
+            strokeWidth: 2,
+            strokeUniform: true,
             transparentCorners: false,
             selectable: false,
             
@@ -786,7 +972,10 @@ const drawRect = (pointer:any) => {
             width: Math.abs(width),
             height: height,
             angle: 0,
-            fill: currentBaseInfo.color+'80',
+            fill: currentBaseInfo.color+'20',
+            stroke: currentBaseInfo.color,
+            strokeWidth: 2,
+            strokeUniform: true,
             transparentCorners: false,
             selectable: false,
             
@@ -800,7 +989,10 @@ const drawRect = (pointer:any) => {
             width: width,
             height: Math.abs(height),
             angle: 0,
-            fill: currentBaseInfo.color+'80',
+            fill: currentBaseInfo.color+'20',
+            stroke: currentBaseInfo.color,
+            strokeWidth: 2,
+            strokeUniform: true,
             transparentCorners: false,
             selectable: false,
             
@@ -814,7 +1006,10 @@ const drawRect = (pointer:any) => {
             width: Math.abs(width),
             height: Math.abs(height),
             angle: 0,
-            fill: currentBaseInfo.color+'80',
+            fill: currentBaseInfo.color+'20',
+            stroke: currentBaseInfo.color,
+            strokeWidth: 2,
+            strokeUniform: true,
             transparentCorners: false,
             selectable: false,
             
@@ -830,53 +1025,24 @@ const drawRect = (pointer:any) => {
 
 //绘制圆
 const drawCircle = (points:number[]) => {
-    let imgWidth = imageObj.width * imageObj.scaleX
-    let imgHeight = imageObj.height * imageObj.scaleY
     let currentId = generateId()
     let currentBaseInfo = labelList.value[currentLabelTypeIndex.value]
     fabricCanvas.remove(circle)
     // 创建一个初始的圆形对象并添加到画布中
     circle = Object.assign(new fabric.Circle({
-        left: points[0],
-        top: points[1],
-        radius: 0,
-        fill: currentBaseInfo.color+'80',
+        left: (points[2] + points[0]) / 2,
+        top: (points[3] + points[1]) / 2,
+        radius: Math.min(Math.abs(points[2] - points[0]), Math.abs(points[3] - points[1])) / 2,
+        fill: currentBaseInfo.color+'20',
+        stroke: currentBaseInfo.color,
+        strokeWidth: 2,
+        strokeUniform: true,
         originX: 'center',
         originY: 'center',
         selectable: false
     }), {index:currentId})
 
-    let radius = Math.sqrt(Math.pow(points[2] - points[0], 2) + Math.pow(points[3] - points[1], 2));
-    if(points[0] == imgWidth){
-        radius = 0
-    }
-    if(points[1] == imgHeight){
-        radius = 0
-    }
-    if(radius + points[0] > imgWidth ){
-        radius = Math.abs((points[0] - imgWidth)/2)
-    }
-    if(radius + points[1] > imgHeight ){
-        radius = Math.abs((points[1] - imgHeight)/2)
-    }
-    if(radius + points[0] > imgWidth && radius + points[1] > imgHeight){
-        radius = Math.min(Math.abs((points[0] - imgWidth)/2), Math.abs((points[1] - imgHeight)/2))
-    }
-    if(points[0] - radius < 0){
-        radius = Math.abs((points[0])/2)
-    }
-    if(points[1] - radius < 0){
-        radius = Math.abs((points[1])/2)
-    }
-    if(points[0] - radius < 0 && points[1] - radius < 0){
-        radius = Math.min(Math.abs((points[0])/2), Math.abs((points[1])/2))
-    }
-
-    circle.set({
-        radius: radius,
-        left: (points[2] + points[0]) / 2,
-        top: (points[3] + points[1]) / 2,
-    });
+    const radius = circle.radius
 
     let labelStoreObj:storeObj = {index:currentId, baseInfo:currentBaseInfo, shapeType:202, fabricObj: circle}
     if(radius > 0){
@@ -906,30 +1072,11 @@ const drawPolygon = (points:{x:number, y:number}[]) => {
 
 //限定标注点边框位置
 const limitPoint = (point:{x:number, y:number}) => {
-    let imgWidth = imageObj.width * imageObj.scaleX
-    let imgHeight = imageObj.height * imageObj.scaleY
-    let returnPoint:{x:number, y:number} = {x:0, y:0}
-    returnPoint.x = point.x
-    returnPoint.y = point.y
-    // 左边界检查
-    if (point.x < 0) {
-        returnPoint.x = 0
+    const bounds = getImageBounds()
+    return {
+        x: Math.max(bounds.left, Math.min(point.x, bounds.right)),
+        y: Math.max(bounds.top, Math.min(point.y, bounds.bottom)),
     }
-    // 上边界检查
-    if (point.y < 0) {
-        returnPoint.y = 0
-    }
-    // 右边界检查
-    if (point.x > imgWidth) {
-        returnPoint.x = imgWidth
-        
-    }
-    // 下边界检查
-    if (point.y > imgHeight) {
-        returnPoint.y = imgHeight
-    }
-
-    return returnPoint
 } 
 
 
@@ -937,55 +1084,38 @@ const limitPoint = (point:{x:number, y:number}) => {
 function limitObjectToBackground(obj:any) {
 
     if (!imageObj) return;
+    const backgroundBounds = getImageBounds()
+    obj.setCoords()
+    let objBounds = obj.getBoundingRect(true)
 
-    let objBounds = obj.getBoundingRect(true);
-    let backgroundBounds = imageObj.getBoundingRect(true);
-
-    //是否是圆形
-    let isCircle = false
-
-    isCircle = labelResults.value.find((o:any) => o.index === obj.index)?.shapeType === 202
-
-    // 限制对象移动边界
-    if (objBounds.left < backgroundBounds.left) {
-        if(isCircle){
-            obj.set('left', backgroundBounds.left + objBounds.width/2)
-        }else{
-            obj.set('left', backgroundBounds.left)
-        }
-        
-        
+    if (objBounds.width > backgroundBounds.width && objBounds.width > 0) {
+        obj.scaleX *= backgroundBounds.width / objBounds.width
+        obj.setCoords()
+        objBounds = obj.getBoundingRect(true)
     }
-    if (objBounds.top < backgroundBounds.top) {
-        if(isCircle){
-            obj.set('top', backgroundBounds.top + objBounds.height/2)
-        }else{
-            obj.set('top', backgroundBounds.top)
-        }
-        
+    if (objBounds.height > backgroundBounds.height && objBounds.height > 0) {
+        obj.scaleY *= backgroundBounds.height / objBounds.height
+        obj.setCoords()
+        objBounds = obj.getBoundingRect(true)
     }
-    if (objBounds.left + objBounds.width > backgroundBounds.left + backgroundBounds.width) {
-        if(isCircle){
-            obj.set('left', backgroundBounds.left + backgroundBounds.width - objBounds.width/2)
-        }else{
-            obj.set('left', backgroundBounds.left + backgroundBounds.width - objBounds.width)
-        }
-        
-    }
-    if (objBounds.top + objBounds.height > backgroundBounds.top + backgroundBounds.height) {
-        if(isCircle){
-            obj.set('top', backgroundBounds.top + backgroundBounds.height - objBounds.height/2)
-        }else{
-            obj.set('top', backgroundBounds.top + backgroundBounds.height - objBounds.height)
-        }
 
+    let deltaX = 0
+    let deltaY = 0
+    if (objBounds.left < backgroundBounds.left) deltaX = backgroundBounds.left - objBounds.left
+    if (objBounds.left + objBounds.width > backgroundBounds.right) {
+        deltaX = backgroundBounds.right - (objBounds.left + objBounds.width)
     }
-    obj.setCoords(); // 更新对象的坐标
+    if (objBounds.top < backgroundBounds.top) deltaY = backgroundBounds.top - objBounds.top
+    if (objBounds.top + objBounds.height > backgroundBounds.bottom) {
+        deltaY = backgroundBounds.bottom - (objBounds.top + objBounds.height)
+    }
+    obj.set({ left: (obj.left || 0) + deltaX, top: (obj.top || 0) + deltaY })
+    obj.setCoords()
 
 }
 
 
-onMounted(() => {
+onMounted(async () => {
     generateColors()
     let labelStoreObj:storeObj
     aside.enableEditingModel()
@@ -1213,9 +1343,18 @@ onMounted(() => {
     
     });
 
+    fabricCanvas.on('object:moving', (e:any) => {
+        limitObjectToBackground(e.target)
+    })
+
+    fabricCanvas.on('object:scaling', (e:any) => {
+        limitObjectToBackground(e.target)
+    })
+
     fabricCanvas.on('object:modified', (e:any) => {
         limitObjectToBackground(e.target)
         fabricCanvas.renderAll()
+        save()
     })
 
     fabricCanvas.on('mouse:wheel', (opt:any) =>{
@@ -1225,10 +1364,15 @@ onMounted(() => {
     if(zoom < 1){
         zoom = 1
     }
+    if(zoom > 8){
+        zoom = 8
+    }
     fabricCanvas.zoomToPoint({
             x: opt.e.offsetX,
             y: opt.e.offsetY
         }, zoom)
+        opt.e.preventDefault()
+        opt.e.stopPropagation()
         document.body.style.overflow = 'hidden'
     })
 
@@ -1279,11 +1423,9 @@ onMounted(() => {
     
     
     window.addEventListener('resize', handleResize);
-    document.addEventListener('keydown', (event) => {
-    if(event.key === 'Delete' || event.key === 'Backspace'){
-        deleteSelectedObject()
-    }
-    })
+    document.addEventListener('keydown', handleCanvasKeydown)
+    await loadTaskImages()
+    await loadLabeledStates()
     const routeFileIndex = currentFiles.value.findIndex((file) => file.id === routeFileId.value)
     currentFileIndex.value = routeFileIndex >= 0 ? routeFileIndex : 0
     loadCurrentFile()
@@ -1294,6 +1436,9 @@ onMounted(() => {
 
 onUnmounted(() => {
     aside.disableEditingModel()
+    window.removeEventListener('resize', handleResize)
+    document.removeEventListener('keydown', handleCanvasKeydown)
+    fabricCanvas?.dispose()
 })
 
 const handleEdit = (objIn:storeObj) => {
@@ -1383,6 +1528,10 @@ const handleHide = (objIn:storeObj) => {
                     fill: rgb(39, 86, 236);
                 }
             }
+            &.active{
+                background-color: rgba(37, 99, 235, 0.35);
+                box-shadow: inset 3px 0 0 #60a5fa;
+            }
         }
     }
 }
@@ -1426,6 +1575,10 @@ const handleHide = (objIn:storeObj) => {
                     font-size: 3em;
                     fill: rgb(39, 86, 236);
                 }
+            }
+            &.active{
+                background-color: rgba(37, 99, 235, 0.35);
+                box-shadow: inset 3px 0 0 #60a5fa;
             }
         }
     }

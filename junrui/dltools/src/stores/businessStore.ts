@@ -6,6 +6,9 @@ export type TrainStatus = '训练中' | '已完成' | '失败'
 
 export interface ManagedFile {
   id: number
+  backendId?: string
+  imageIndex?: number
+  imageName?: string
   name: string
   type: DataType
   projectId: number
@@ -14,6 +17,7 @@ export interface ManagedFile {
   uploadTime: string
   source: string
   url?: string
+  imageCount?: number
 }
 
 export interface LabelTask {
@@ -37,6 +41,7 @@ export interface SampleSet {
   projectName: string
   count: number
   sourceTaskId?: number
+  fileIds?: number[]
   creator: string
   createTime: string
   description: string
@@ -70,6 +75,18 @@ export interface TrainTask {
   progress: number
   status: TrainStatus
   description: string
+  jobId?: string
+  currentEpoch?: number
+  message?: string
+  boxLoss?: number
+  clsLoss?: number
+  precision?: number
+  recall?: number
+  map50?: number
+  map5095?: number
+  modelPath?: string
+  logs?: string
+  error?: string
 }
 
 export interface DetectionResult {
@@ -154,15 +171,26 @@ export const useBusinessStore = defineStore('business', {
     },
     importSampleFromLabelTask(taskId: number) {
       const task = this.labelTasks.find((item) => item.id === taskId)
-      if (!task || this.samples.some((item) => item.sourceTaskId === taskId)) return
+      if (!task) return
+      const imageCount = task.fileIds.reduce((total, fileId) => {
+        const file = this.files.find((item) => item.id === fileId)
+        return total + Math.max(file?.imageCount || 1, 1)
+      }, 0)
+      const existing = this.samples.find((item) => item.sourceTaskId === taskId)
+      if (existing) {
+        existing.count = Math.max(imageCount, task.fileIds.length || 1)
+        existing.fileIds = [...task.fileIds]
+        return
+      }
       this.samples.unshift({
         id: this.createId(),
         name: `${task.name}-样本集`,
         type: '图像',
         projectId: task.projectId,
         projectName: task.projectName,
-        count: Math.max(task.fileIds.length * 120, 120),
+        count: Math.max(imageCount, task.fileIds.length || 1),
         sourceTaskId: task.id,
+        fileIds: [...task.fileIds],
         creator: '本地用户',
         createTime: nowText(),
         description: '由审核通过的标注任务导入。',
@@ -193,7 +221,9 @@ export const useBusinessStore = defineStore('business', {
       if (model) model.status = '已发布'
     },
     addTrainTask(payload: Omit<TrainTask, 'id' | 'progress' | 'status'>) {
-      this.trainTasks.unshift({ ...payload, id: this.createId(), progress: 15, status: '训练中' })
+      const task = { ...payload, id: this.createId(), progress: 0, status: '训练中' as TrainStatus }
+      this.trainTasks.unshift(task)
+      return task
     },
     updateTrainTask(id: number, payload: Partial<Omit<TrainTask, 'id'>>) {
       const task = this.trainTasks.find((item) => item.id === id)
@@ -221,6 +251,25 @@ export const useBusinessStore = defineStore('business', {
           description: `由训练任务 ${task.name} 生成。`,
         })
       }
+    },
+    registerTrainedModel(id: number) {
+      const task = this.trainTasks.find((item) => item.id === id)
+      if (!task?.modelPath) return
+      const name = `${task.name}-best`
+      if (this.models.some((item) => item.name === name)) return
+      const pretrained = this.models.find((item) => item.id === task.modelId)
+      this.models.unshift({
+        id: this.createId(),
+        name,
+        taskType: pretrained?.taskType || '图像识别',
+        targetType: pretrained?.targetType || '电线',
+        projectId: task.projectId,
+        projectName: task.projectName,
+        status: '已发布',
+        source: '训练生成',
+        map: task.map5095 === undefined ? '待评估' : task.map5095.toFixed(4),
+        description: `训练任务“${task.name}”生成，模型文件：${task.modelPath}`,
+      })
     },
     addDetectionResults(results: Omit<DetectionResult, 'id' | 'createTime'>[]) {
       results.forEach((item) => {

@@ -28,6 +28,7 @@ interface FileManagerRecord {
   originalFileStoreUrl?: string
   disposedFileStoreUrl?: string
   createUserName?: string
+  imageCount?: number
 }
 
 export const typeToCode = (type: DataType) => {
@@ -51,6 +52,7 @@ export const mapFileRecord = (item: FileManagerRecord): ManagedFile => {
   const id = Number(item.id)
   return {
     id,
+    backendId: item.id,
     name: item.cName || item.cname || item.eName || item.ename || fileNameFromPath(item.originalFileStoreUrl) || `文件${item.id}`,
     type: codeToType(item.originalFileType),
     projectId: Number(item.projId || 0),
@@ -59,6 +61,7 @@ export const mapFileRecord = (item: FileManagerRecord): ManagedFile => {
     uploadTime: item.createTime || item.updateTime || '',
     source: item.des || '数据库记录',
     url: `/api/AIModuleServer/FileManager/preview?id=${item.id}`,
+    imageCount: item.imageCount ?? 1,
   }
 }
 
@@ -88,7 +91,10 @@ export const uploadFileRecord = async (file: File, payload: { name: string; type
   form.append('chunkNumber', '0')
   form.append('totalChunks', '1')
   form.append('addFileUserId', '48')
-  const response = await request.post<ApiResult<string>>('/AIModuleServer/FileManager/addFile', form)
+  const response = await request.post<ApiResult<string>>('/AIModuleServer/FileManager/addFile', form, {
+    // ZIP uploads are synchronously stored, extracted and indexed by the backend.
+    timeout: 300000,
+  })
   if (response.data.code !== 20000) {
     throw new Error(response.data.message || '文件上传失败')
   }
@@ -96,7 +102,7 @@ export const uploadFileRecord = async (file: File, payload: { name: string; type
 
 export const updateFileRecord = async (file: ManagedFile) => {
   await request.post('/AIModuleServer/FileManager/updateFile', {
-    id: String(file.id),
+    id: file.backendId || String(file.id),
     eName: file.name,
     cName: file.name,
     projId: String(file.projectId || 2),
@@ -105,11 +111,21 @@ export const updateFileRecord = async (file: ManagedFile) => {
     status: 2,
     logicalDelete: 0,
     originalFileStoreUrl: file.url?.startsWith('/api/') ? undefined : file.url,
+    imageCount: file.imageCount ?? 1,
   })
 }
 
-export const deleteFileRecord = async (id: number) => {
+export const deleteFileRecord = async (id: string | number) => {
   const form = new FormData()
   form.append('id', String(id))
   await request.post('/AIModuleServer/FileManager/deleteFile', form)
 }
+
+export const listPreviewImages = async (id: string | number) => {
+  const response = await request.get<ApiResult<string[]>>('/AIModuleServer/FileManager/previewImages', {
+    params: { id },
+  })
+  return response.data.data || []
+}
+
+export const previewImageUrl = (id: string | number, index: number) => `/api/AIModuleServer/FileManager/previewImage?id=${id}&index=${index}`

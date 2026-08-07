@@ -3,6 +3,7 @@ package com.idtserver.mrserver.dto;
 public class LabelAnnotationPayload {
     private Long taskId;
     private Long fileId;
+    private Integer imageIndex;
     private String labelData;
     private String labelList;
     private String picStoreUrl;
@@ -21,6 +22,14 @@ public class LabelAnnotationPayload {
 
     public void setFileId(Long fileId) {
         this.fileId = fileId;
+    }
+
+    public Integer getImageIndex() {
+        return imageIndex;
+    }
+
+    public void setImageIndex(Integer imageIndex) {
+        this.imageIndex = imageIndex;
     }
 
     public String getLabelData() {

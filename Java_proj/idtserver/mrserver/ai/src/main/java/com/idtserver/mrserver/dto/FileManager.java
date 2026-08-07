@@ -21,6 +21,7 @@ public class FileManager {
     Integer logicalDelete;
     String originalFileStoreUrl;
     String disposedFileStoreUrl;
+    Integer imageCount;
     String projName;
     String createUserId;
     String createUserName;

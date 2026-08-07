@@ -27,12 +27,21 @@
         <div>
           <h2>智能识别标注工作区</h2>
           <p>上传图像或视频后，可同屏查看原始数据与标注结果。</p>
+          <p v-if="isAutoMode" style="color: #22c55e; font-weight: 600;">
+            📷 自动检测模式：相机实时识别中
+          </p>
         </div>
         <div class="toolbar-actions">
-          <el-upload :auto-upload="false" :show-file-list="false" accept=".jpg,.jpeg,.png,.mp4" :on-change="handleFileChange">
+          <el-upload
+            :auto-upload="false"
+            :show-file-list="false"
+            accept=".jpg,.jpeg,.png,.mp4"
+            :on-change="handleFileChange"
+            :disabled="isAutoMode"
+          >
             <el-button type="primary">选择文件</el-button>
           </el-upload>
-          <el-button :disabled="!sourceUrl || running" @click="runDetection">
+          <el-button :disabled="!sourceUrl || running || isAutoMode" @click="runDetection">
             {{ running ? '识别中...' : '开始识别' }}
           </el-button>
           <el-dropdown :disabled="results.length === 0">
@@ -44,36 +53,68 @@
               </el-dropdown-menu>
             </template>
           </el-dropdown>
+          <el-button size="small" type="success" :loading="autoModeLoading" @click="toggleAutoMode">
+            {{ isAutoMode ? '停止自动检测' : '启动自动检测' }}
+          </el-button>
         </div>
       </div>
 
       <div class="preview-grid">
+        <!-- ========== 左侧：原始数据（显示原图，无框） ========== -->
         <div class="preview-block">
           <div class="preview-head">
             <span>原始数据</span>
-            <small>{{ fileName || '未选择文件' }}</small>
+            <small>{{ fileName || (isAutoMode ? '实时相机图像' : '未选择文件') }}</small>
           </div>
           <div class="media-box">
-            <img v-if="fileKind === 'image'" :src="sourceUrl" alt="原始图像" />
-            <video v-else-if="fileKind === 'video'" :src="sourceUrl" controls />
-            <div v-else class="empty-state">请选择 .jpg、.png 或 .mp4 文件</div>
+            <!-- 自动检测模式：显示原图（无框） -->
+            <img
+              v-if="isAutoMode && originalImageUrl"
+              :src="originalImageUrl"
+              alt="原始图像"
+            />
+            <!-- 手动模式：显示用户上传的图片 -->
+            <img
+              v-else-if="fileKind === 'image'"
+              :src="sourceUrl"
+              alt="原始图像"
+            />
+            <video
+              v-else-if="fileKind === 'video'"
+              :src="sourceUrl"
+              controls
+            />
+            <div v-else class="empty-state">
+              {{ isAutoMode ? '等待相机新图片...' : '请选择 .jpg、.png 或 .mp4 文件' }}
+            </div>
           </div>
         </div>
 
+        <!-- ========== 右侧：识别标注结果（显示带框图片） ========== -->
         <div class="preview-block">
           <div class="preview-head">
             <span>识别标注结果</span>
             <small>{{ selectedModel?.name || '未选择模型' }}</small>
           </div>
           <div class="media-box result-box">
-            <template v-if="sourceUrl">
+            <template v-if="isAutoMode && realTimeImageUrl">
+              <img :src="realTimeImageUrl" alt="实时识别结果" />
+            </template>
+            <template v-else-if="sourceUrl">
               <img v-if="fileKind === 'image'" :src="sourceUrl" alt="识别结果" />
               <video v-else-if="fileKind === 'video'" :src="sourceUrl" controls muted />
-              <div v-for="item in results" :key="item.id" class="detect-box" :style="boxStyle(item)">
+              <div
+                v-for="item in results"
+                :key="item.id"
+                class="detect-box"
+                :style="boxStyle(item)"
+              >
                 <span>{{ item.label }} {{ item.confidence }}%</span>
               </div>
             </template>
-            <div v-else class="empty-state">识别后将在这里显示目标框、类别与置信度</div>
+            <div v-else class="empty-state">
+              {{ isAutoMode ? '等待检测结果...' : '识别后将在这里显示目标框' }}
+            </div>
           </div>
         </div>
       </div>
@@ -113,12 +154,18 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, ref } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { UploadFile } from 'element-plus'
 import allStore from '@/stores'
 import type { ModelItem } from '@/stores/businessStore'
-import { runYoloDetection } from '@/api/detection'
+import {
+  getCameraDetectionStatus,
+  getLatestCameraDetection,
+  runYoloDetection,
+  startCameraDetection,
+  stopCameraDetection,
+} from '@/api/detection'
 
 type FileKind = 'image' | 'video' | ''
 
@@ -145,6 +192,14 @@ const running = ref(false)
 const results = ref<DetectionResult[]>([])
 const historyKeyword = ref('')
 
+// ========== 实时检测模式 ==========
+const isAutoMode = ref(false)
+const realTimeImageUrl = ref('')
+const originalImageUrl = ref('')
+const pollingTimer = ref<number | null>(null)
+const isPolling = ref(false)
+const autoModeLoading = ref(false)
+
 const taskTypeOptions = ['全部', '图像识别', '视频识别']
 const targetTypeOptions = [
   { label: '全部', value: '全部' },
@@ -168,20 +223,107 @@ const filteredModels = computed(() => {
 const filteredHistory = computed(() => {
   const keyword = historyKeyword.value.trim()
   if (!keyword) return business.detectionResults
-  return business.detectionResults.filter((item) => `${item.fileName}${item.modelName}${item.label}`.includes(keyword))
+  return business.detectionResults.filter((item) =>
+    `${item.fileName}${item.modelName}${item.label}`.includes(keyword)
+  )
 })
 
+// ========== 拉取最新实时检测结果 ==========
+const fetchLatest = async () => {
+  if (!isAutoMode.value || isPolling.value) return
+  isPolling.value = true
+  try {
+    const data = await getLatestCameraDetection()
+    if (data?.imageUrl) {
+        const cacheKey = data.timestamp ? `?t=${data.timestamp}` : ''
+        realTimeImageUrl.value = `${data.imageUrl}${cacheKey}`
+
+        if (data.originalImage) {
+          originalImageUrl.value = `${data.originalImage}${cacheKey}`
+        } else {
+          originalImageUrl.value = `${data.imageUrl.replace('/det_', '/orig_')}${cacheKey}`
+        }
+        fileName.value = '相机实时拍摄'
+
+        // 解析检测结果
+        if (data.jsonData) {
+          try {
+            const json = JSON.parse(data.jsonData)
+            const list = json.detections || []
+            results.value = list.map((it: any, i: number) => ({
+              id: i,
+              label: it.class || it.label,
+              confidence: Math.round(it.confidence * 100),
+              x: it.bbox ? Math.round(it.bbox[0]) : it.x,
+              y: it.bbox ? Math.round(it.bbox[1]) : it.y,
+              width: it.bbox ? Math.round(it.bbox[2] - it.bbox[0]) : it.width,
+              height: it.bbox ? Math.round(it.bbox[3] - it.bbox[1]) : it.height,
+            }))
+          } catch (e) {
+            console.error('解析相机识别结果失败:', e)
+          }
+        }
+    }
+  } catch (e) {
+    console.error('读取相机识别结果失败:', e)
+  } finally {
+    isPolling.value = false
+  }
+}
+
+// ========== 启动/停止轮询 ==========
+const startAutoDetect = () => {
+  clearAutoTimer()
+  fetchLatest()
+  pollingTimer.value = window.setInterval(fetchLatest, 2000)
+}
+
+const clearAutoTimer = () => {
+  if (pollingTimer.value) {
+    clearInterval(pollingTimer.value)
+    pollingTimer.value = null
+  }
+}
+
+const toggleAutoMode = async () => {
+  if (autoModeLoading.value) return
+  autoModeLoading.value = true
+  try {
+    if (!isAutoMode.value) {
+      const state = await startCameraDetection()
+      isAutoMode.value = state.running
+      startAutoDetect()
+      ElMessage.success(`已监听文件夹：${state.watchPath}`)
+    } else {
+      await stopCameraDetection()
+      isAutoMode.value = false
+      clearAutoTimer()
+      realTimeImageUrl.value = ''
+      originalImageUrl.value = ''
+      results.value = []
+      ElMessage.info('已停止自动检测')
+    }
+  } catch (error: any) {
+    ElMessage.error(error?.message || '切换自动检测失败')
+  } finally {
+    autoModeLoading.value = false
+  }
+}
+
+// ========== 原有手动上传逻辑 ==========
 const handleFileChange = (uploadFile: UploadFile) => {
   const raw = uploadFile.raw
   if (!raw) return
-
   if (sourceUrl.value) URL.revokeObjectURL(sourceUrl.value)
-
   fileName.value = raw.name
   sourceFile.value = raw
   sourceUrl.value = URL.createObjectURL(raw)
   fileKind.value = raw.type.startsWith('video') ? 'video' : 'image'
   results.value = []
+  if (isAutoMode.value) {
+    clearAutoTimer()
+    isAutoMode.value = false
+  }
 }
 
 const runDetection = async () => {
@@ -194,17 +336,15 @@ const runDetection = async () => {
     return
   }
   if (fileKind.value !== 'image') {
-    ElMessage.warning('当前先支持图片识别，视频识别后续会接抽帧流程')
+    ElMessage.warning('当前仅支持图片识别')
     return
   }
 
   running.value = true
   try {
-    results.value = await runYoloDetection({
-      file: sourceFile.value,
-      conf: 0.25,
-    })
-    business.addDetectionResults(results.value.map((item) => ({
+    const res = await runYoloDetection({ file: sourceFile.value, conf: 0.25 })
+    results.value = res
+    business.addDetectionResults(res.map(item => ({
       fileName: fileName.value,
       modelName: selectedModel.value?.name || '',
       label: item.label,
@@ -214,10 +354,9 @@ const runDetection = async () => {
       width: item.width,
       height: item.height,
     })))
-    ElMessage.success(`识别完成，检测到 ${results.value.length} 个目标`)
-  } catch (error:any) {
-    const isTimeout = error?.code === 'ECONNABORTED' || `${error?.message || ''}`.toLowerCase().includes('timeout')
-    ElMessage.error(isTimeout ? '识别超时，首次加载YOLO模型可能较慢，请稍后重试' : error?.message || '识别失败，请检查后端和YOLO模型路径')
+    ElMessage.success(`识别完成，检测到 ${res.length} 个目标`)
+  } catch (error: any) {
+    ElMessage.error(error.message || '识别失败')
   } finally {
     running.value = false
   }
@@ -231,7 +370,7 @@ const boxStyle = (item: DetectionResult) => ({
 })
 
 const downloadResult = (type: 'json' | 'csv') => {
-  const data = results.value.map((item) => ({
+  const data = results.value.map(item => ({
     fileName: fileName.value,
     modelName: selectedModel.value?.name,
     ...item,
@@ -240,17 +379,33 @@ const downloadResult = (type: 'json' | 'csv') => {
     ? JSON.stringify(data, null, 2)
     : [
         'fileName,modelName,label,confidence,x,y,width,height',
-        ...data.map((item) => `${item.fileName},${item.modelName},${item.label},${item.confidence},${item.x},${item.y},${item.width},${item.height}`),
+        ...data.map(it => `${it.fileName},${it.modelName},${it.label},${it.confidence},${it.x},${it.y},${it.width},${it.height}`),
       ].join('\n')
-
   const blob = new Blob([content], { type: type === 'json' ? 'application/json' : 'text/csv' })
   const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `detection-result.${type}`
-  link.click()
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `detection-result.${type}`
+  a.click()
   URL.revokeObjectURL(url)
 }
+
+// ========== 生命周期钩子 ==========
+onMounted(async () => {
+  try {
+    const state = await getCameraDetectionStatus()
+    if (state.running) {
+      isAutoMode.value = true
+      startAutoDetect()
+    }
+  } catch {
+    // The manual detection workflow remains available while the backend starts.
+  }
+})
+
+onBeforeUnmount(() => {
+  clearAutoTimer()
+})
 </script>
 
 <style lang="scss" scoped>
@@ -268,7 +423,7 @@ const downloadResult = (type: 'json' | 'csv') => {
   gap: 14px;
   padding: 18px;
   border-right: 1px solid #d8dee9;
-  background: #ffffff;
+  background: #fff;
 }
 
 .panel-title {
@@ -291,7 +446,7 @@ const downloadResult = (type: 'json' | 'csv') => {
   text-align: left;
   border: 1px solid #d8dee9;
   border-radius: 8px;
-  background: #ffffff;
+  background: #fff;
   cursor: pointer;
 }
 
@@ -340,6 +495,7 @@ const downloadResult = (type: 'json' | 'csv') => {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .preview-grid {
@@ -352,7 +508,7 @@ const downloadResult = (type: 'json' | 'csv') => {
 .result-table {
   border: 1px solid #d8dee9;
   border-radius: 8px;
-  background: #ffffff;
+  background: #fff;
 }
 
 .preview-head {
@@ -398,7 +554,7 @@ const downloadResult = (type: 'json' | 'csv') => {
   padding: 3px 7px;
   border-radius: 4px;
   background: #22c55e;
-  color: #ffffff;
+  color: #fff;
   font-size: 12px;
   white-space: nowrap;
 }
@@ -429,11 +585,9 @@ const downloadResult = (type: 'json' | 'csv') => {
     grid-template-columns: 1fr;
     height: auto;
   }
-
   .preview-grid {
     grid-template-columns: 1fr;
   }
-
   .toolbar {
     flex-direction: column;
     align-items: stretch;

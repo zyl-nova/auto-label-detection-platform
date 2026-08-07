@@ -63,6 +63,9 @@ public class FileManagerServiceImpl implements FileManagerService {
         fileManager.setUpdateTime(new Date());
         fileManager.setCreateTime(new Date());
         fileManager.setStatus(0);
+        if (fileManager.getImageCount() == null) {
+            fileManager.setImageCount(1);
+        }
         fileManagerMapper.createFileManagerRecord(fileManager);
         File file = new File(filePath);
         if(fileManager.getOriginalFileType().equals(0)){
@@ -81,6 +84,8 @@ public class FileManagerServiceImpl implements FileManagerService {
                 try{
                     StoreMutipartFile storeMutipartFile = new StoreMutipartFile();
                     storeMutipartFile.unzip(file.getAbsolutePath(), storeImgsPathDir.getAbsolutePath());
+                    int imageCount = storeMutipartFile.countImages(storeImgsPathDir.getAbsolutePath());
+                    fileManager.setImageCount(imageCount);
                     //将状态设置为2,完成
                     fileManager.setStatus(2);
                     fileManager.setDisposedFileStoreUrl(storeImgsPathDir.getAbsolutePath());

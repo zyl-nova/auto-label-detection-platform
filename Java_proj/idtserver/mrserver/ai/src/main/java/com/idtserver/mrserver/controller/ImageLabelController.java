@@ -35,10 +35,12 @@ public class ImageLabelController {
                 ? "[]"
                 : payload.getLabelList();
 
-        MapLabelTaskPicsToUser current = imageLabelMapper.getSavedAnnotation(payload.getTaskId(), payload.getFileId());
+        int imageIndex = payload.getImageIndex() == null ? 0 : Math.max(payload.getImageIndex(), 0);
+        MapLabelTaskPicsToUser current = imageLabelMapper.getSavedAnnotation(payload.getTaskId(), payload.getFileId(), imageIndex);
         MapLabelTaskPicsToUser annotation = new MapLabelTaskPicsToUser();
         annotation.setInfoFilesManagerInfoId(String.valueOf(payload.getFileId()));
         annotation.setInfoLabelTaskId(String.valueOf(payload.getTaskId()));
+        annotation.setImageIndex(imageIndex);
         annotation.setLabelData(labelData);
         annotation.setLabelList(labelList);
         annotation.setMapLabelTaskUserTabId("48");
@@ -58,7 +60,8 @@ public class ImageLabelController {
 
     @GetMapping("annotation")
     public Result<MapLabelTaskPicsToUser> annotation(@RequestParam("taskId") Long taskId,
-                                                    @RequestParam("fileId") Long fileId) {
-        return Result.success(imageLabelMapper.getSavedAnnotation(taskId, fileId));
+                                                    @RequestParam("fileId") Long fileId,
+                                                    @RequestParam(value = "imageIndex", defaultValue = "0") Integer imageIndex) {
+        return Result.success(imageLabelMapper.getSavedAnnotation(taskId, fileId, Math.max(imageIndex, 0)));
     }
 }

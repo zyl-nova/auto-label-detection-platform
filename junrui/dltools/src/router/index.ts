@@ -26,7 +26,7 @@ const router = createRouter({
     },
     {
       path:'/',
-      redirect:'/home'
+      redirect:'/fileManager'
     },
     {
       path:'/home',
