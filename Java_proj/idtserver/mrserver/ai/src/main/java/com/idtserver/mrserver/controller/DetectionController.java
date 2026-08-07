@@ -4,25 +4,16 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.idtserver.mrserver.dto.DetectionResultPayload;
 import com.idtserver.mrserver.result.Result;
+import lombok.Data;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ClassPathResource;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
+import java.io.*;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.UUID;
+import java.nio.file.*;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 @RestController
@@ -39,6 +30,8 @@ public class DetectionController {
     private String defaultYoloModelPath;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    private static final String RESULT_DIR = "D:/project3/auto-label-detection-platform-main/results/";
 
     @PostMapping("run")
     public Result<?> run(@RequestParam("file") MultipartFile file,
@@ -76,12 +69,90 @@ public class DetectionController {
         }
     }
 
+    @GetMapping("/latest")
+    public Result<CameraResultVO> getLatestResult() {
+        System.out.println("📡 收到 /Detection/latest 请求");
+
+        File dir = new File(RESULT_DIR);
+        if (!dir.exists() || !dir.isDirectory()) {
+            System.out.println("❌ 目录不存在: " + RESULT_DIR);
+            return Result.success(null);
+        }
+
+        // ========== 修改：支持 .jpg 和 .png ==========
+        File[] detFiles = dir.listFiles((d, name) ->
+                (name.toLowerCase().endsWith(".jpg") || name.toLowerCase().endsWith(".png"))
+                        && name.toLowerCase().startsWith("det_"));
+
+        if (detFiles == null || detFiles.length == 0) {
+            System.out.println("⚠️ 没有检测结果图片");
+            return Result.success(null);
+        }
+
+        File latestImage = Arrays.stream(detFiles)
+                .filter(File::isFile)
+                .max(Comparator.comparingLong(File::lastModified))
+                .orElse(null);
+
+        if (latestImage == null) {
+            System.out.println("⚠️ 没有找到最新图片");
+            return Result.success(null);
+        }
+
+        System.out.println("🖼️ 找到最新图片: " + latestImage.getName());
+
+        CameraResultVO vo = new CameraResultVO();
+        vo.setImageUrl("/results/" + latestImage.getName());
+        vo.setTimestamp(latestImage.lastModified());
+
+        // ========== 修改：支持 .jpg 和 .png 的 JSON 文件名匹配 ==========
+        String baseName = latestImage.getName();
+        // 替换任意图片后缀为 .json
+        String jsonName = baseName.replaceFirst("\\.[a-zA-Z]+$", ".json");
+        File jsonFile = new File(RESULT_DIR + jsonName);
+
+        System.out.println("🔍 查找 JSON 文件: " + jsonFile.getAbsolutePath());
+        System.out.println("🔍 JSON 文件是否存在: " + jsonFile.exists());
+
+        if (jsonFile.exists()) {
+            try {
+                String jsonContent = new String(Files.readAllBytes(jsonFile.toPath()), StandardCharsets.UTF_8);
+                vo.setJsonData(jsonContent);
+                System.out.println("✅ 读取 JSON 成功，长度: " + jsonContent.length());
+            } catch (IOException e) {
+                System.out.println("❌ 读取 JSON 失败: " + e.getMessage());
+                vo.setJsonData("{\"filename\":\"" + latestImage.getName() + "\",\"detections\":[]}");
+            }
+        } else {
+            System.out.println("⚠️ JSON 文件不存在: " + jsonName);
+            vo.setJsonData("{\"filename\":\"" + latestImage.getName() + "\",\"detections\":[]}");
+        }
+
+        // ========== 新增：设置原图路径 ==========
+        String origName = baseName.replaceFirst("det_", "orig_");
+        File origFile = new File(RESULT_DIR + origName);
+        if (origFile.exists()) {
+            vo.setOriginalImage("/results/" + origName);
+            System.out.println("✅ 原图存在: " + origName);
+        }
+
+        return Result.success(vo);
+    }
+
+    @Data
+    public static class CameraResultVO {
+        private String imageUrl;
+        private String originalImage;  // 新增原图字段
+        private String jsonData;
+        private long timestamp;
+    }
+
     private Path prepareScript() throws IOException {
         ClassPathResource resource = new ClassPathResource("scripts/yolo_detect.py");
         Path scriptPath = Paths.get(resourcesPath, "scripts", "yolo_detect.py").toAbsolutePath();
         Files.createDirectories(scriptPath.getParent());
         try (InputStream inputStream = resource.getInputStream()) {
-            Files.copy(inputStream, scriptPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            Files.copy(inputStream, scriptPath, StandardCopyOption.REPLACE_EXISTING);
         }
         return scriptPath;
     }
