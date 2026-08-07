@@ -49,6 +49,7 @@
                 javaType="java.lang.String" />
         <result column="info_label_task_id" jdbcType="BIGINT" property="infoLabelTaskId"
                 javaType="java.lang.String" />
+        <result column="image_index" jdbcType="INTEGER" property="imageIndex" />
         <result column="label_data" jdbcType="VARCHAR" property="labelData" />
         <result column="label_list" jdbcType="VARCHAR" property="labelList" />
         <result column="user_id" jdbcType="INTEGER" property="mapLabelTaskUserTabId"
@@ -114,6 +115,7 @@
             tab.id,
             tab.info_files_manager_info_id,
             tab.info_label_task_id,
+            tab.image_index,
             tab.label_data,
             tab.label_list,
             tab.user_id,
@@ -136,6 +138,7 @@
             tab.id,
             tab.info_files_manager_info_id,
             tab.info_label_task_id,
+            tab.image_index,
             tab.label_data,
             tab.label_list,
             tab.user_id,
@@ -148,7 +151,29 @@
         where tab.logical_delete = 0
         and tab.info_files_manager_info_id = #{fileId}
         and tab.info_label_task_id = #{taskId}
+        and COALESCE(tab.image_index, 0) = #{imageIndex}
         limit 1
+    </select>
+
+    <select id="getAnnotationsForTask" resultMap="MapLabelTaskPicsToUser">
+        select
+            tab.id,
+            tab.info_files_manager_info_id,
+            tab.info_label_task_id,
+            tab.image_index,
+            tab.label_data,
+            tab.label_list,
+            tab.user_id,
+            tab.review_status,
+            tab.create_time,
+            tab.update_time,
+            tab.logical_delete,
+            tab.pic_store_url
+        from map_label_task_pics_to_user tab
+        where tab.logical_delete = 0
+          and tab.info_label_task_id = #{taskId}
+          and tab.label_data is not null
+        order by tab.info_files_manager_info_id, COALESCE(tab.image_index, 0)
     </select>
 
     <insert id="createAnnotation" parameterType="com.idtserver.mrserver.dto.MapLabelTaskPicsToUser">
@@ -156,6 +181,7 @@
         (
             info_files_manager_info_id,
             info_label_task_id,
+            image_index,
             label_data,
             label_list,
             user_id,
@@ -169,6 +195,7 @@
         (
             CAST(#{infoFilesManagerInfoId} AS int8),
             CAST(#{infoLabelTaskId} AS int8),
+            #{imageIndex},
             CAST(#{labelData} AS jsonb),
             CAST(#{labelList} AS jsonb),
             CAST(#{mapLabelTaskUserTabId} AS int4),

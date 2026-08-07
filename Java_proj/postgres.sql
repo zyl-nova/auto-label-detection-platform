@@ -269,6 +269,8 @@ INSERT INTO "public"."info_files_manager_info" VALUES (504547991944691712, NULL,
 INSERT INTO "public"."info_files_manager_info" VALUES (504548090783465472, NULL, NULL, NULL, 4, 60, 1, '2024-10-24 14:53:58.893', '2024-10-24 14:53:58.893', 0, '321', 2, 'D:\Java_proj\idtserver\static\originalFiles\4a74ed9f-0a73-45eb-b104-a59a3078c872.mp4', 'D:\Java_proj\idtserver\static\pics2Train\4a74ed9f-0a73-45eb-b104-a59a3078c872_o', 48);
 INSERT INTO "public"."info_files_manager_info" VALUES (504549879482155008, NULL, NULL, NULL, 2, 61, 1, '2024-10-24 15:01:05.352', '2024-10-24 15:01:05.352', 0, '1234', 2, 'D:\Java_proj\idtserver\static\originalFiles\8ed3db9e-3667-4cfa-81b3-766d497fa43a.mp4', 'D:\Java_proj\idtserver\static\pics2Train\8ed3db9e-3667-4cfa-81b3-766d497fa43a_o', 48);
 INSERT INTO "public"."info_files_manager_info" VALUES (507439790572961792, NULL, NULL, NULL, 2, 62, 1, '2024-11-01 14:24:33.848', '2024-11-01 14:24:33.848', 0, '', 2, 'D:\Java_proj\idtserver\static\originalFiles\c04739db-4bd4-4bc5-8ddc-537372d208c7.mp4', 'D:\Java_proj\idtserver\static\pics2Train\c04739db-4bd4-4bc5-8ddc-537372d208c7_o', 48);
+ALTER TABLE "public"."info_files_manager_info" ADD COLUMN IF NOT EXISTS "image_count" int4 DEFAULT 1;
+ALTER TABLE "public"."map_label_task_pics_to_user" ADD COLUMN IF NOT EXISTS "image_index" int4 DEFAULT 0;
 
 -- ----------------------------
 -- Table structure for info_label_task

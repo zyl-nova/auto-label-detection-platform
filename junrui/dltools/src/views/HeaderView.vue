@@ -34,8 +34,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, ref, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { QuestionFilled } from '@element-plus/icons-vue'
 import request from '@/utils/request'
 import allStore from '@/stores'
@@ -44,6 +44,7 @@ import { storeToRefs } from 'pinia'
 const { currentUser } = allStore()
 const { currentUserName } = storeToRefs(currentUser)
 const router = useRouter()
+const route = useRoute()
 
 const moduleList = ref([
   { id: 0, name: '首页', eName: 'file', url: '/fileManager' },
@@ -55,12 +56,18 @@ const moduleList = ref([
 ])
 
 const logo = ref(new URL('@/assets/image/logo.png', import.meta.url).href)
-const activeName = ref('file')
+const activeName = computed(() => {
+  const currentModule = moduleList.value.find((item) => (
+    route.path === item.url || route.path.startsWith(`${item.url}/`)
+  ))
+  return currentModule?.eName || ''
+})
 const circleUrl = ref('https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png')
 
 const handleSwitch = (newdata: string, url: string) => {
-  activeName.value = newdata
-  router.push(url)
+  if (activeName.value !== newdata || route.path !== url) {
+    router.push(url)
+  }
 }
 
 onMounted(() => {

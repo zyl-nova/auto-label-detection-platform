@@ -1,172 +1,226 @@
 <template>
-    <div>
-        <el-space :fill=true direction="vertical" wrap style="width: 100%;height: 100%;overflow: hidden;" >
-            <!-- 导航栏开始 -->
-            <div class="bread-nav">
-                <el-breadcrumb :separator-icon="ArrowRight">
-                    <el-breadcrumb-item :to="{ path: '/taskCenter' }">任务中心</el-breadcrumb-item>
-                    <el-breadcrumb-item>训练模型</el-breadcrumb-item>
-                </el-breadcrumb>
-            </div>
-            <!-- 导航栏结束 -->
-            <el-steps
-                style="align-items: center; justify-content: center; width: 100%;margin: 5vh 0 5vh 0;"
-                :space="400"
-                :active="activeStep"
-                finish-status="success"
-                align-center
-            >
-                <el-step title="训练配置" />
-                <el-step title="模型查看" />
-            </el-steps>
-            <div v-if="trainResult === 1" >
-                <div style="display: flex;flex-direction: row;">
-                    <el-skeleton style="width: 40%;height: 40vh;margin: 0 0 0 5vw;">
-                        <template #template>
-                            <el-skeleton-item variant="image" style="margin:2rem 0 0 0;width: 100%; height: 100%" />
-                        </template>
-                    </el-skeleton>
-                    <el-skeleton style="width: 40%;height: 40vh;margin: 0 0 0 5vw;">
-                        <template #template>
-                            <el-skeleton-item variant="image" style="margin:2rem 0 0 0;width: 100%; height: 100%" />
-                        </template>
-                    </el-skeleton>
-                </div>
-                
-                <!-- 底部按钮 -->
-                <div style="display: flex;justify-content: center;  margin: 10vh 0 0 0;">
-                    <el-button class="button-content"  @click="handleExit()">
-                        退出
-                    </el-button>
-                    <el-button class="button-content" @click="handleLastStep()">
-                        上一步
-                    </el-button>
-                </div>
-            </div>
-            <div v-else class="content-train">
-                <svg-icon v-if="trainResult === 0" iconName="icon-loading" class="loading"></svg-icon>
-                <svg-icon v-else-if="trainResult === 2" iconName="icon-cuowu" style="color: red;width: 10vw;height: 10vh;"></svg-icon>
-                <div class="progress">
-                    <el-progress
-                        v-if="trainResult === 0"
-                        :text-inside="true"
-                        :stroke-width="20"
-                        :percentage="50"
-                        status="success"
-                    />
-                    <el-progress
-                        v-else-if="trainResult === 2"
-                        :text-inside="true"
-                        :stroke-width="20"
-                        :percentage="50"
-                        status="exception"
-                    />
-                </div>
-                <div style="display: flex;justify-content: center;font-weight: bold;">
-                    <p v-if="trainResult === 0 ">模型正在训练中，请稍等</p>
-                    <p v-if="trainResult === 2">训练失败</p>
-                </div>
+  <div class="training-page">
+    <el-page-header content="训练看板" @back="router.push('/taskCenter')" />
 
-                <!-- 底部按钮 -->
-                <div style="display: flex;justify-content: center;  margin: 25vh 0 0 0;">
-                    <el-button class="button-content"  @click="handleExit()">
-                        退出
-                    </el-button>
-                    <el-button class="button-content" @click="handleLastStep()">
-                        上一步
-                    </el-button>
-                </div>
-            </div>
-            
+    <el-empty v-if="!task" description="训练任务不存在" />
+    <template v-else>
+      <div class="summary">
+        <div>
+          <h2>{{ task.name }}</h2>
+          <p>{{ statusMessage }}</p>
+        </div>
+        <el-tag :type="statusTagType" size="large">{{ task.status }}</el-tag>
+      </div>
 
-            
-        </el-space>
-    </div>
+      <section class="progress-section">
+        <div class="progress-title">
+          <span>训练进度</span>
+          <span>Epoch {{ task.currentEpoch || 0 }} / {{ task.epoch }}</span>
+        </div>
+        <el-progress
+          :percentage="task.progress"
+          :stroke-width="18"
+          :status="task.status === '失败' ? 'exception' : task.status === '已完成' ? 'success' : undefined"
+        />
+      </section>
+
+      <section class="metrics-grid">
+        <div class="metric"><span>Box Loss</span><strong>{{ metric(task.boxLoss) }}</strong></div>
+        <div class="metric"><span>Class Loss</span><strong>{{ metric(task.clsLoss) }}</strong></div>
+        <div class="metric"><span>Precision</span><strong>{{ metric(task.precision) }}</strong></div>
+        <div class="metric"><span>Recall</span><strong>{{ metric(task.recall) }}</strong></div>
+        <div class="metric"><span>mAP@50</span><strong>{{ metric(task.map50) }}</strong></div>
+        <div class="metric"><span>mAP@50:95</span><strong>{{ metric(task.map5095) }}</strong></div>
+      </section>
+
+      <section v-if="task.modelPath" class="result-section">
+        <h3>训练结果</h3>
+        <el-descriptions :column="1" border>
+          <el-descriptions-item label="最佳模型">{{ task.modelPath }}</el-descriptions-item>
+          <el-descriptions-item label="样本集">{{ task.sampleName }}</el-descriptions-item>
+          <el-descriptions-item label="预训练模型">{{ task.modelName }}</el-descriptions-item>
+        </el-descriptions>
+      </section>
+
+      <section class="log-section">
+        <div class="log-title">
+          <h3>训练日志</h3>
+          <el-button :loading="refreshing" @click="refreshStatus">刷新</el-button>
+        </div>
+        <pre>{{ task.logs || '等待训练进程输出...' }}</pre>
+      </section>
+
+      <div class="actions">
+        <el-button @click="router.push('/taskCenter')">返回任务中心</el-button>
+        <el-button v-if="task.status === '训练中' && task.jobId" type="danger" @click="stopTraining">停止训练</el-button>
+      </div>
+    </template>
+  </div>
 </template>
+
 <script lang="ts" setup>
-import { ArrowRight } from '@element-plus/icons-vue'
-import {onMounted, ref} from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { useRoute, useRouter } from 'vue-router'
+import allStore from '@/stores'
+import { cancelTraining, getTrainingStatus } from '@/api/training'
+import type { TrainStatus } from '@/stores/businessStore'
 
+const route = useRoute()
+const router = useRouter()
+const { business } = allStore()
+const refreshing = ref(false)
+const taskId = computed(() => Number(route.query.taskId || 0))
+const task = computed(() => business.trainTasks.find((item) => item.id === taskId.value))
+const statusMessage = computed(() => task.value?.message || (task.value?.status === '训练中' ? '正在等待训练进度' : ''))
+const statusTagType = computed(() => task.value?.status === '已完成' ? 'success' : task.value?.status === '失败' ? 'danger' : 'warning')
 
-const trainResult = ref()
-trainResult.value = history.state.trainResult
+const metric = (value?: number) => value === undefined || value === null ? '--' : value.toFixed(4)
 
-const activeStep = ref(0)
-
-const handleExit = () => {
-
+const refreshStatus = async () => {
+  if (!task.value?.jobId) return
+  refreshing.value = true
+  try {
+    const status = await getTrainingStatus(task.value.jobId)
+    const trainStatus:TrainStatus = status.status === 'completed'
+      ? '已完成'
+      : status.status === 'failed' || status.status === 'cancelled'
+        ? '失败'
+        : '训练中'
+    business.updateTrainTask(task.value.id, {
+      status: trainStatus,
+      progress: status.progress || 0,
+      currentEpoch: status.currentEpoch || 0,
+      message: status.message,
+      boxLoss: status.boxLoss,
+      clsLoss: status.clsLoss,
+      precision: status.precision,
+      recall: status.recall,
+      map50: status.map50,
+      map5095: status.map5095,
+      modelPath: status.modelPath,
+      logs: status.logs,
+      error: status.error,
+    })
+    if (status.status === 'completed') business.registerTrainedModel(task.value.id)
+  } catch (error:any) {
+    ElMessage.error(error?.message || '读取训练进度失败')
+  } finally {
+    refreshing.value = false
+  }
 }
 
-const handleLastStep = () => {
-
+const stopTraining = async () => {
+  if (!task.value?.jobId) return
+  await ElMessageBox.confirm('确认停止当前训练任务？', '停止训练', { type: 'warning' })
+  await cancelTraining(task.value.jobId)
+  business.updateTrainTask(task.value.id, { status: '失败', message: '训练已停止' })
+  ElMessage.success('训练已停止')
 }
 
-onMounted(() =>{
-    if(trainResult.value === 0 || trainResult.value === 2){
-        activeStep.value = 1
-    }else if(trainResult.value === 1){
-        activeStep.value = 2
-    }
+let timer:number | undefined
+onMounted(() => {
+  refreshStatus()
+  timer = window.setInterval(refreshStatus, 2500)
 })
-
+onUnmounted(() => window.clearInterval(timer))
 </script>
 
-<style lang="scss" scoped>
-.bread-nav{
-    margin: 0.5% 0 0.5% 0.5%;
-    
+<style scoped>
+.training-page {
+  padding: 22px;
+  color: #1f2937;
 }
 
-.progress{
-    margin: 5vh 0 0 0;
-    width: 100%;
-    display: flex;
-    justify-content: center;
-    :deep(.el-progress){
-        width: 50vw;
-    }
-
-    :deep(.el-progress-bar__innerText){
-        vertical-align:middle;
-        font-size: 1rem;
-        color: black;
-    }
+.summary,
+.progress-title,
+.log-title,
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
-
-
-
-.content-train{
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    .loading{
-        animation: rotation 7s infinite linear;
-        width: 10vw;
-        height: 10vh;
-        
-    }
-    @keyframes rotation {
-    from {
-        transform: rotate(0deg);
-    }
-    to {
-        transform: rotate(360deg);
-    }
-}
+.summary {
+  margin-top: 22px;
+  border-bottom: 1px solid #d8dee9;
+  padding-bottom: 14px;
 }
 
-
-
-
-
-.button-content{
-    margin: 0 2vw 0 2vw;
-    background: rgb(56, 181, 74) ;
-    color:white;
-    width: 12em;
-    border-radius: 2em;
+.summary h2,
+.log-title h3,
+.result-section h3 {
+  margin: 0;
 }
 
+.summary p {
+  margin: 6px 0 0;
+  color: #667085;
+}
+
+.progress-section,
+.result-section,
+.log-section {
+  margin-top: 24px;
+}
+
+.progress-title {
+  margin-bottom: 10px;
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(150px, 1fr));
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.metric {
+  border: 1px solid #d8dee9;
+  border-radius: 6px;
+  padding: 14px;
+  background: #fff;
+}
+
+.metric span {
+  display: block;
+  color: #667085;
+  font-size: 13px;
+}
+
+.metric strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 20px;
+}
+
+.log-title {
+  margin-bottom: 8px;
+}
+
+pre {
+  box-sizing: border-box;
+  min-height: 220px;
+  max-height: 360px;
+  overflow: auto;
+  margin: 0;
+  padding: 14px;
+  background: #111827;
+  color: #d1d5db;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+}
+
+.actions {
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+@media (max-width: 900px) {
+  .metrics-grid {
+    grid-template-columns: repeat(2, minmax(140px, 1fr));
+  }
+}
 </style>

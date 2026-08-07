@@ -19,6 +19,7 @@ Java_proj/idtserver/mrserver/**/target/
 
 # Local runtime uploads and generated model files
 static/
+cameraInbox/
 yolov8n.pt
 *.pt
 *.onnx
@@ -36,4 +37,7 @@ Java_proj/idtserver/mrserver/**/static/
 # Temporary files
 *.tmp
 *.temp
+__pycache__/
+*.pyc
+backend-ai*.log
 Java_proj/idtserver/mrserver/ai/src/main/resources/scripts/ultralytics_config/

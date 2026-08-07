@@ -29,8 +29,8 @@
         <div class="actions">
           <el-button @click="openDetail(task)">查看</el-button>
           <el-button @click="openEdit(task)">编辑</el-button>
-          <el-button @click="router.push({ name: 'trainSituation', state: { trainResult: task.status === '失败' ? 2 : task.status === '已完成' ? 1 : 0 } })">训练看板</el-button>
-          <el-button type="success" :disabled="task.status === '已完成'" @click="finishTask(task.id)">完成训练</el-button>
+          <el-button @click="router.push({ name: 'trainSituation', query: { taskId: String(task.id) } })">训练看板</el-button>
+          <el-button v-if="task.status === '训练中' && task.jobId" type="warning" @click="stopTask(task)">停止训练</el-button>
           <el-button @click="copyTask(task.id)">复制</el-button>
           <el-button type="danger" @click="deleteTask(task.id)">删除</el-button>
         </div>
@@ -93,12 +93,13 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { Search } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import allStore from '@/stores'
 import type { TrainStatus, TrainTask } from '@/stores/businessStore'
+import { cancelTraining, getTrainingStatus } from '@/api/training'
 
 const router = useRouter()
 const { business } = allStore()
@@ -176,9 +177,45 @@ const saveTask = () => {
   ElMessage.success('训练任务已保存')
 }
 
-const finishTask = (id: number) => {
-  business.finishTrainTask(id)
-  ElMessage.success('训练已完成，并生成已发布模型')
+const applyTrainingStatus = (task: TrainTask, status: Awaited<ReturnType<typeof getTrainingStatus>>) => {
+  const taskStatus:TrainStatus = status.status === 'completed'
+    ? '已完成'
+    : status.status === 'failed' || status.status === 'cancelled'
+      ? '失败'
+      : '训练中'
+  business.updateTrainTask(task.id, {
+    status: taskStatus,
+    progress: status.progress || 0,
+    currentEpoch: status.currentEpoch || 0,
+    message: status.message,
+    boxLoss: status.boxLoss,
+    clsLoss: status.clsLoss,
+    precision: status.precision,
+    recall: status.recall,
+    map50: status.map50,
+    map5095: status.map5095,
+    modelPath: status.modelPath,
+    logs: status.logs,
+    error: status.error,
+  })
+  if (status.status === 'completed') business.registerTrainedModel(task.id)
+}
+
+const refreshTrainingTasks = async () => {
+  await Promise.all(business.trainTasks.filter((task) => task.jobId && task.status === '训练中').map(async (task) => {
+    try {
+      applyTrainingStatus(task, await getTrainingStatus(task.jobId!))
+    } catch (error) {
+      console.warn('读取训练进度失败。', error)
+    }
+  }))
+}
+
+const stopTask = async (task: TrainTask) => {
+  if (!task.jobId) return
+  await cancelTraining(task.jobId)
+  business.updateTrainTask(task.id, { status: '失败', message: '训练已停止' })
+  ElMessage.success('训练已停止')
 }
 
 const copyTask = (id: number) => {
@@ -208,6 +245,13 @@ const deleteTask = (id: number) => {
     })
     .catch(() => undefined)
 }
+
+let refreshTimer:number | undefined
+onMounted(() => {
+  refreshTrainingTasks()
+  refreshTimer = window.setInterval(refreshTrainingTasks, 3000)
+})
+onUnmounted(() => window.clearInterval(refreshTimer))
 </script>
 
 <style scoped>

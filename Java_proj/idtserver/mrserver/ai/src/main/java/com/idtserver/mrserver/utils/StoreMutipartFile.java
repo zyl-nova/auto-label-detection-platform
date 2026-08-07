@@ -9,9 +9,12 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 @Data
 public class StoreMutipartFile {
@@ -70,7 +73,12 @@ public class StoreMutipartFile {
                 } else {
                     OutputStream os = null;
                     try {
-                        os = new BufferedOutputStream(new FileOutputStream(new File(destDir, entry.getName())));
+                        File outputFile = new File(destDir, entry.getName());
+                        File parentFile = outputFile.getParentFile();
+                        if (parentFile != null && !parentFile.exists()) {
+                            parentFile.mkdirs();
+                        }
+                        os = new BufferedOutputStream(new FileOutputStream(outputFile));
                         //输出文件路径信息
                         IOUtils.copy(inputStream, os);
                     } finally {
@@ -80,6 +88,28 @@ public class StoreMutipartFile {
             }
 
         }
+    }
+
+    public int countImages(String dirPath) throws IOException {
+        Path root = Paths.get(dirPath);
+        if (!Files.exists(root)) {
+            return 0;
+        }
+        try (Stream<Path> paths = Files.walk(root)) {
+            return (int) paths
+                    .filter(Files::isRegularFile)
+                    .filter(path -> isImageFile(path.getFileName().toString()))
+                    .count();
+        }
+    }
+
+    public boolean isImageFile(String fileName) {
+        String lowerName = fileName.toLowerCase(Locale.ROOT);
+        return lowerName.endsWith(".jpg")
+                || lowerName.endsWith(".jpeg")
+                || lowerName.endsWith(".png")
+                || lowerName.endsWith(".bmp")
+                || lowerName.endsWith(".webp");
     }
 
     public static ZipArchiveInputStream getZipFile(File zipFile)  {

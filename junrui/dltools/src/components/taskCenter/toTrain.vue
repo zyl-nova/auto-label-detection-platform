@@ -36,7 +36,7 @@
       </el-form-item>
       <el-form-item>
         <el-button @click="router.push('/taskCenter')">取消</el-button>
-        <el-button type="primary" @click="submitForm(formRef)">开始训练</el-button>
+        <el-button type="primary" :loading="submitting" :disabled="submitting" @click="submitForm(formRef)">开始训练</el-button>
       </el-form-item>
     </el-form>
   </div>
@@ -48,11 +48,13 @@ import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import allStore from '@/stores'
+import { startTraining } from '@/api/training'
 
 const router = useRouter()
 const route = useRoute()
 const { business } = allStore()
 const formRef = ref<FormInstance>()
+const submitting = ref(false)
 
 const form = reactive({
   name: '',
@@ -74,26 +76,47 @@ const syncProjectBySample = () => undefined
 
 const submitForm = async (formEl?: FormInstance) => {
   if (!formEl) return
-  await formEl.validate((valid) => {
+  await formEl.validate(async (valid) => {
     if (!valid || !form.sampleId || !form.modelId) return
     const sample = business.samples.find((item) => item.id === form.sampleId)
     const model = business.models.find((item) => item.id === form.modelId)
     if (!sample || !model) return
-    business.addTrainTask({
-      name: form.name,
-      projectId: sample.projectId,
-      projectName: sample.projectName,
-      sampleId: sample.id,
-      sampleName: sample.name,
-      modelId: model.id,
-      modelName: model.name,
-      learningRate: form.learningRate,
-      epoch: form.epoch,
-      batchSize: form.batchSize,
-      description: form.description,
-    })
-    ElMessage.success('训练任务已创建')
-    router.push('/taskCenter')
+    if (!sample.sourceTaskId) {
+      ElMessage.warning('该样本没有关联已标注任务，无法生成训练数据集')
+      return
+    }
+    if (submitting.value) return
+    submitting.value = true
+    try {
+      const job = await startTraining({
+        labelTaskId: sample.sourceTaskId,
+        taskName: form.name,
+        epochs: form.epoch,
+        batchSize: form.batchSize,
+        learningRate: form.learningRate,
+      })
+      const task = business.addTrainTask({
+        name: form.name,
+        projectId: sample.projectId,
+        projectName: sample.projectName,
+        sampleId: sample.id,
+        sampleName: sample.name,
+        modelId: model.id,
+        modelName: model.name,
+        learningRate: form.learningRate,
+        epoch: form.epoch,
+        batchSize: form.batchSize,
+        description: form.description,
+        jobId: job.jobId,
+        message: `已准备 ${job.sampleCount} 张样本`,
+      })
+      ElMessage.success('训练任务已启动')
+      await router.replace({ name: 'trainSituation', query: { taskId: String(task.id) } })
+    } catch (error:any) {
+      ElMessage.error(error?.message || '启动训练失败')
+    } finally {
+      submitting.value = false
+    }
   })
 }
 

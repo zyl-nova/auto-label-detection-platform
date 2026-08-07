@@ -53,7 +53,7 @@
               </el-dropdown-menu>
             </template>
           </el-dropdown>
-          <el-button size="small" type="success" @click="toggleAutoMode">
+          <el-button size="small" type="success" :loading="autoModeLoading" @click="toggleAutoMode">
             {{ isAutoMode ? '停止自动检测' : '启动自动检测' }}
           </el-button>
         </div>
@@ -99,14 +99,6 @@
           <div class="media-box result-box">
             <template v-if="isAutoMode && realTimeImageUrl">
               <img :src="realTimeImageUrl" alt="实时识别结果" />
-              <div
-                v-for="item in results"
-                :key="`auto-${item.id}`"
-                class="detect-box"
-                :style="boxStyle(item)"
-              >
-                <span>{{ item.label }} {{ item.confidence }}%</span>
-              </div>
             </template>
             <template v-else-if="sourceUrl">
               <img v-if="fileKind === 'image'" :src="sourceUrl" alt="识别结果" />
@@ -167,8 +159,13 @@ import { ElMessage } from 'element-plus'
 import type { UploadFile } from 'element-plus'
 import allStore from '@/stores'
 import type { ModelItem } from '@/stores/businessStore'
-import { runYoloDetection } from '@/api/detection'
-import axios from 'axios'
+import {
+  getCameraDetectionStatus,
+  getLatestCameraDetection,
+  runYoloDetection,
+  startCameraDetection,
+  stopCameraDetection,
+} from '@/api/detection'
 
 type FileKind = 'image' | 'video' | ''
 
@@ -201,7 +198,7 @@ const realTimeImageUrl = ref('')
 const originalImageUrl = ref('')
 const pollingTimer = ref<number | null>(null)
 const isPolling = ref(false)
-const lastImage = ref('')
+const autoModeLoading = ref(false)
 
 const taskTypeOptions = ['全部', '图像识别', '视频识别']
 const targetTypeOptions = [
@@ -236,36 +233,22 @@ const fetchLatest = async () => {
   if (!isAutoMode.value || isPolling.value) return
   isPolling.value = true
   try {
-    const res = await axios.get('/api/Detection/latest')
-    console.log('📡 fetchLatest 响应:', res.data)
+    const data = await getLatestCameraDetection()
+    if (data?.imageUrl) {
+        const cacheKey = data.timestamp ? `?t=${data.timestamp}` : ''
+        realTimeImageUrl.value = `${data.imageUrl}${cacheKey}`
 
-    if (res.data?.code === 200 || res.data?.code === 20000) {
-      const data = res.data.data
-      console.log('📡 data:', data)
-
-      if (data?.imageUrl) {
-        // 直接更新，不判断是否相同
-        console.log('🖼️ 更新图片:', data.imageUrl)
-
-        // 右侧：带框图片
-        realTimeImageUrl.value = data.imageUrl
-
-        // 左侧：原图（优先使用 originalImage，否则尝试构造）
         if (data.originalImage) {
-          originalImageUrl.value = data.originalImage
+          originalImageUrl.value = `${data.originalImage}${cacheKey}`
         } else {
-          originalImageUrl.value = data.imageUrl.replace('/det_', '/orig_')
+          originalImageUrl.value = `${data.imageUrl.replace('/det_', '/orig_')}${cacheKey}`
         }
-        console.log('🖼️ 原图 URL:', originalImageUrl.value)
-        console.log('🖼️ 带框图片 URL:', realTimeImageUrl.value)
-
         fileName.value = '相机实时拍摄'
 
         // 解析检测结果
         if (data.jsonData) {
           try {
             const json = JSON.parse(data.jsonData)
-            console.log('📄 解析后的 JSON:', json)
             const list = json.detections || []
             results.value = list.map((it: any, i: number) => ({
               id: i,
@@ -276,17 +259,13 @@ const fetchLatest = async () => {
               width: it.bbox ? Math.round(it.bbox[2] - it.bbox[0]) : it.width,
               height: it.bbox ? Math.round(it.bbox[3] - it.bbox[1]) : it.height,
             }))
-            console.log('✅ 更新结果:', results.value.length, '个目标')
           } catch (e) {
-            console.error('❌ 解析 JSON 失败:', e)
+            console.error('解析相机识别结果失败:', e)
           }
         }
-      } else {
-        console.log('⚠️ data.imageUrl 为空')
-      }
     }
   } catch (e) {
-    console.error('❌ fetchLatest 失败:', e)
+    console.error('读取相机识别结果失败:', e)
   } finally {
     isPolling.value = false
   }
@@ -297,28 +276,37 @@ const startAutoDetect = () => {
   clearAutoTimer()
   fetchLatest()
   pollingTimer.value = window.setInterval(fetchLatest, 2000)
-  console.log('📷 开始轮询')
 }
 
 const clearAutoTimer = () => {
   if (pollingTimer.value) {
     clearInterval(pollingTimer.value)
     pollingTimer.value = null
-    console.log('📷 停止轮询')
   }
 }
 
-const toggleAutoMode = () => {
-  isAutoMode.value = !isAutoMode.value
-  if (isAutoMode.value) {
-    startAutoDetect()
-    ElMessage.success('已启动相机实时自动检测')
-  } else {
-    clearAutoTimer()
-    realTimeImageUrl.value = ''
-    originalImageUrl.value = ''
-    results.value = []
-    ElMessage.info('已停止自动检测')
+const toggleAutoMode = async () => {
+  if (autoModeLoading.value) return
+  autoModeLoading.value = true
+  try {
+    if (!isAutoMode.value) {
+      const state = await startCameraDetection()
+      isAutoMode.value = state.running
+      startAutoDetect()
+      ElMessage.success(`已监听文件夹：${state.watchPath}`)
+    } else {
+      await stopCameraDetection()
+      isAutoMode.value = false
+      clearAutoTimer()
+      realTimeImageUrl.value = ''
+      originalImageUrl.value = ''
+      results.value = []
+      ElMessage.info('已停止自动检测')
+    }
+  } catch (error: any) {
+    ElMessage.error(error?.message || '切换自动检测失败')
+  } finally {
+    autoModeLoading.value = false
   }
 }
 
@@ -403,8 +391,16 @@ const downloadResult = (type: 'json' | 'csv') => {
 }
 
 // ========== 生命周期钩子 ==========
-onMounted(() => {
-
+onMounted(async () => {
+  try {
+    const state = await getCameraDetectionStatus()
+    if (state.running) {
+      isAutoMode.value = true
+      startAutoDetect()
+    }
+  } catch {
+    // The manual detection workflow remains available while the backend starts.
+  }
 })
 
 onBeforeUnmount(() => {

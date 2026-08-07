@@ -29,9 +29,20 @@ public class DetectionController {
     @Value("${yolo-model-path:}")
     private String defaultYoloModelPath;
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    @Value("${camera-watch-path:cameraInbox}")
+    private String cameraWatchPath;
 
-    private static final String RESULT_DIR = "D:/project3/auto-label-detection-platform-main/results/";
+    @Value("${camera-results-path:static/cameraResults}")
+    private String cameraResultsPath;
+
+    @Value("${camera-confidence:0.25}")
+    private Double cameraConfidence;
+
+    @Value("${camera-scan-interval:2}")
+    private Double cameraScanInterval;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
+    private Process cameraProcess;
 
     @PostMapping("run")
     public Result<?> run(@RequestParam("file") MultipartFile file,
@@ -69,13 +80,65 @@ public class DetectionController {
         }
     }
 
-    @GetMapping("/latest")
-    public Result<CameraResultVO> getLatestResult() {
-        System.out.println("📡 收到 /Detection/latest 请求");
+    @PostMapping("camera/start")
+    public synchronized Result<?> startCameraDetection() {
+        if (cameraProcess != null && cameraProcess.isAlive()) {
+            return Result.success(cameraState(true));
+        }
+        Path modelPath = Paths.get(defaultYoloModelPath).toAbsolutePath().normalize();
+        if (!Files.isRegularFile(modelPath)) {
+            return Result.failure("YOLO模型文件不存在：" + modelPath);
+        }
+        try {
+            Path watchDir = Paths.get(cameraWatchPath).toAbsolutePath().normalize();
+            Path resultDir = cameraResultDir();
+            Files.createDirectories(watchDir);
+            Files.createDirectories(resultDir);
+            Path scriptPath = prepareCameraScript();
+            Path logPath = resultDir.resolve("camera-watcher.log");
 
-        File dir = new File(RESULT_DIR);
+            List<String> command = Arrays.asList(
+                    pythonCommand,
+                    scriptPath.toString(),
+                    "--watch-dir", watchDir.toString(),
+                    "--output-dir", resultDir.toString(),
+                    "--model", modelPath.toString(),
+                    "--conf", String.valueOf(cameraConfidence),
+                    "--interval", String.valueOf(cameraScanInterval)
+            );
+            ProcessBuilder builder = new ProcessBuilder(command);
+            builder.redirectErrorStream(true);
+            builder.redirectOutput(ProcessBuilder.Redirect.appendTo(logPath.toFile()));
+            builder.environment().put("PYTHONIOENCODING", "UTF-8");
+            builder.environment().put("YOLO_CONFIG_DIR",
+                    Paths.get(resourcesPath, "ultralytics-config").toAbsolutePath().normalize().toString());
+            cameraProcess = builder.start();
+            return Result.success(cameraState(true));
+        } catch (Exception e) {
+            cameraProcess = null;
+            return Result.failure("启动相机监听失败：" + e.getMessage());
+        }
+    }
+
+    @PostMapping("camera/stop")
+    public synchronized Result<?> stopCameraDetection() {
+        if (cameraProcess != null && cameraProcess.isAlive()) {
+            cameraProcess.destroyForcibly();
+        }
+        cameraProcess = null;
+        return Result.success(cameraState(false));
+    }
+
+    @GetMapping("camera/status")
+    public Result<?> cameraDetectionStatus() {
+        return Result.success(cameraState(cameraProcess != null && cameraProcess.isAlive()));
+    }
+
+    @GetMapping("latest")
+    public Result<CameraResultVO> getLatestResult() {
+        Path resultDir = cameraResultDir();
+        File dir = resultDir.toFile();
         if (!dir.exists() || !dir.isDirectory()) {
-            System.out.println("❌ 目录不存在: " + RESULT_DIR);
             return Result.success(null);
         }
 
@@ -85,7 +148,6 @@ public class DetectionController {
                         && name.toLowerCase().startsWith("det_"));
 
         if (detFiles == null || detFiles.length == 0) {
-            System.out.println("⚠️ 没有检测结果图片");
             return Result.success(null);
         }
 
@@ -95,11 +157,8 @@ public class DetectionController {
                 .orElse(null);
 
         if (latestImage == null) {
-            System.out.println("⚠️ 没有找到最新图片");
             return Result.success(null);
         }
-
-        System.out.println("🖼️ 找到最新图片: " + latestImage.getName());
 
         CameraResultVO vo = new CameraResultVO();
         vo.setImageUrl("/results/" + latestImage.getName());
@@ -109,31 +168,24 @@ public class DetectionController {
         String baseName = latestImage.getName();
         // 替换任意图片后缀为 .json
         String jsonName = baseName.replaceFirst("\\.[a-zA-Z]+$", ".json");
-        File jsonFile = new File(RESULT_DIR + jsonName);
-
-        System.out.println("🔍 查找 JSON 文件: " + jsonFile.getAbsolutePath());
-        System.out.println("🔍 JSON 文件是否存在: " + jsonFile.exists());
+        File jsonFile = resultDir.resolve(jsonName).toFile();
 
         if (jsonFile.exists()) {
             try {
                 String jsonContent = new String(Files.readAllBytes(jsonFile.toPath()), StandardCharsets.UTF_8);
                 vo.setJsonData(jsonContent);
-                System.out.println("✅ 读取 JSON 成功，长度: " + jsonContent.length());
             } catch (IOException e) {
-                System.out.println("❌ 读取 JSON 失败: " + e.getMessage());
                 vo.setJsonData("{\"filename\":\"" + latestImage.getName() + "\",\"detections\":[]}");
             }
         } else {
-            System.out.println("⚠️ JSON 文件不存在: " + jsonName);
             vo.setJsonData("{\"filename\":\"" + latestImage.getName() + "\",\"detections\":[]}");
         }
 
         // ========== 新增：设置原图路径 ==========
         String origName = baseName.replaceFirst("det_", "orig_");
-        File origFile = new File(RESULT_DIR + origName);
+        File origFile = resultDir.resolve(origName).toFile();
         if (origFile.exists()) {
             vo.setOriginalImage("/results/" + origName);
-            System.out.println("✅ 原图存在: " + origName);
         }
 
         return Result.success(vo);
@@ -155,6 +207,28 @@ public class DetectionController {
             Files.copy(inputStream, scriptPath, StandardCopyOption.REPLACE_EXISTING);
         }
         return scriptPath;
+    }
+
+    private Path prepareCameraScript() throws IOException {
+        ClassPathResource resource = new ClassPathResource("scripts/service1.py");
+        Path scriptPath = Paths.get(resourcesPath, "scripts", "camera_watch.py").toAbsolutePath().normalize();
+        Files.createDirectories(scriptPath.getParent());
+        try (InputStream inputStream = resource.getInputStream()) {
+            Files.copy(inputStream, scriptPath, StandardCopyOption.REPLACE_EXISTING);
+        }
+        return scriptPath;
+    }
+
+    private Path cameraResultDir() {
+        return Paths.get(cameraResultsPath).toAbsolutePath().normalize();
+    }
+
+    private Map<String, Object> cameraState(boolean running) {
+        Map<String, Object> state = new LinkedHashMap<>();
+        state.put("running", running);
+        state.put("watchPath", Paths.get(cameraWatchPath).toAbsolutePath().normalize().toString());
+        state.put("resultsPath", cameraResultDir().toString());
+        return state;
     }
 
     private ProcessOutput runPython(Path scriptPath, Path imagePath, Path modelPath, Double conf) throws Exception {
